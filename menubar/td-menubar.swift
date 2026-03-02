@@ -116,43 +116,17 @@ class TD: NSObject, NSApplicationDelegate {
         NSAppleScript(source: src)?.executeAndReturnError(&err)
     }
 
-    var isAnimating = false
-
     func flash() {
-        guard let button = statusItem.button, !isAnimating else { return }
-        isAnimating = true
+        guard let button = statusItem.button else { return }
+        let gridIcon = NSImage(systemSymbolName: "square.grid.2x2", accessibilityDescription: "td")
+        gridIcon?.size = NSSize(width: 16, height: 16)
+        let checkIcon = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "done")
+        checkIcon?.size = NSSize(width: 16, height: 16)
 
-        let origImage = NSImage(systemSymbolName: "square.grid.2x2", accessibilityDescription: "td")
-        origImage?.size = NSSize(width: 16, height: 16)
-
-        // Pulse: fade out → checkmark → fade back
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.15
-            button.animator().alphaValue = 0.0
-        }, completionHandler: {
-            button.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "done")
-            button.image?.size = NSSize(width: 16, height: 16)
-
-            NSAnimationContext.runAnimationGroup({ ctx in
-                ctx.duration = 0.15
-                button.animator().alphaValue = 1.0
-            }, completionHandler: {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    NSAnimationContext.runAnimationGroup({ ctx in
-                        ctx.duration = 0.15
-                        button.animator().alphaValue = 0.0
-                    }, completionHandler: {
-                        button.image = origImage
-                        NSAnimationContext.runAnimationGroup({ ctx in
-                            ctx.duration = 0.15
-                            button.animator().alphaValue = 1.0
-                        }, completionHandler: {
-                            self.isAnimating = false
-                        })
-                    })
-                }
-            })
-        })
+        button.image = checkIcon
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+            button.image = gridIcon
+        }
     }
 }
 
