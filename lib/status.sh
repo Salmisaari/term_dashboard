@@ -235,3 +235,40 @@ APPLESCRIPT
   done <<< "$output"
   echo "Labeled $count sessions."
 }
+
+# Build and launch the menu bar app
+td_menubar() {
+  local subcmd="${1:-start}"
+
+  local src="${TD_DIR}/menubar/td-menubar.swift"
+  local bin="${TD_DIR}/menubar/td-menubar"
+  local app_dir="${TD_DIR}/menubar/TD.app"
+  local app_bin="${app_dir}/Contents/MacOS/TD"
+
+  case "$subcmd" in
+    start)
+      # Kill existing instance
+      pkill -f "TD.app/Contents/MacOS/TD" 2>/dev/null || true
+
+      # Build if binary is missing or source is newer
+      if [[ ! -f "$app_bin" || "$src" -nt "$app_bin" ]]; then
+        echo "Building menu bar app..."
+        swiftc -o "$bin" "$src" -framework Cocoa 2>&1 || {
+          echo "Build failed"; return 1
+        }
+        mkdir -p "${app_dir}/Contents/MacOS"
+        cp "$bin" "$app_bin"
+        echo "Built."
+      fi
+
+      open "$app_dir"
+      echo "Menu bar app launched (⌘td in top bar)"
+      ;;
+    stop)
+      pkill -f "TD.app/Contents/MacOS/TD" 2>/dev/null && echo "Stopped." || echo "Not running."
+      ;;
+    *)
+      echo "Usage: td menubar [start|stop]"
+      ;;
+  esac
+}

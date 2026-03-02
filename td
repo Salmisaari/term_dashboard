@@ -44,6 +44,7 @@ Commands:
   standup      Morning overview: git status, PRs, CI across all projects
   label        Set iTerm tab titles to project/directory names
   projects     Manage the project registry
+  menubar      Launch the ⌘td menu bar app
 
 Run 'td <command> --help' for details on a specific command.
 EOF
@@ -182,6 +183,20 @@ Examples:
 EOF
 }
 
+show_help_menubar() {
+  cat <<'EOF'
+td menubar — Menu bar app for quick access
+
+  Builds and launches a lightweight macOS menu bar app showing ⌘td.
+  Click it to tile windows, label sessions, or run standup.
+
+Usage:
+  td menubar           Build (if needed) and launch
+  td menubar start     Same as above
+  td menubar stop      Quit the menu bar app
+EOF
+}
+
 # ── Subcommand routing ──────────────────────────────────────────────
 
 cmd="${1:-status}"
@@ -199,6 +214,7 @@ for arg in "$@"; do
       standup)  show_help_standup ;;
       label)    show_help_label ;;
       projects) show_help_projects ;;
+      menubar)  show_help_menubar ;;
       *)        show_help ;;
     esac
     exit 0
@@ -213,6 +229,7 @@ case "$cmd" in
   start)     td_start "$@" ;;
   standup)   td_standup "$@" ;;
   label)     td_label "$@" ;;
+  menubar)   td_menubar "$@" ;;
   projects)  td_projects "$@" ;;
   help|-h|--help) show_help ;;
   *)
