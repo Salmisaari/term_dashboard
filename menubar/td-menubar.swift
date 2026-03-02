@@ -79,15 +79,43 @@ class TD: NSObject, NSApplicationDelegate {
         NSAppleScript(source: src)?.executeAndReturnError(&err)
     }
 
+    var isAnimating = false
+
     func flash() {
-        guard let button = statusItem.button else { return }
-        let orig = button.image
-        button.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "done")
-        button.image?.size = NSSize(width: 16, height: 16)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            button.image = orig
+        guard let button = statusItem.button, !isAnimating else { return }
+        isAnimating = true
+
+        let origImage = NSImage(systemSymbolName: "square.grid.2x2", accessibilityDescription: "td")
+        origImage?.size = NSSize(width: 16, height: 16)
+
+        // Pulse: fade out → checkmark → fade back
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.15
+            button.animator().alphaValue = 0.0
+        }, completionHandler: {
+            button.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "done")
             button.image?.size = NSSize(width: 16, height: 16)
-        }
+
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.15
+                button.animator().alphaValue = 1.0
+            }, completionHandler: {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    NSAnimationContext.runAnimationGroup({ ctx in
+                        ctx.duration = 0.15
+                        button.animator().alphaValue = 0.0
+                    }, completionHandler: {
+                        button.image = origImage
+                        NSAnimationContext.runAnimationGroup({ ctx in
+                            ctx.duration = 0.15
+                            button.animator().alphaValue = 1.0
+                        }, completionHandler: {
+                            self.isAnimating = false
+                        })
+                    })
+                }
+            })
+        })
     }
 }
 
