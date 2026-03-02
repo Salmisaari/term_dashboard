@@ -1,86 +1,98 @@
 import Cocoa
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class TD: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem.button {
-            button.title = "⌘td"
-            button.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .medium)
+            button.image = NSImage(systemSymbolName: "square.grid.2x2", accessibilityDescription: "td")
+            button.image?.size = NSSize(width: 16, height: 16)
+            button.action = #selector(clicked)
+            button.target = self
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
+    }
 
+    @objc func clicked() {
+        guard let event = NSApp.currentEvent else { return }
+
+        if event.type == .rightMouseUp {
+            showMenu()
+        } else {
+            // Left click = tile immediately
+            run("tile")
+            flash()
+        }
+    }
+
+    func showMenu() {
         let menu = NSMenu()
+        menu.minimumWidth = 160
 
-        let tileItem = NSMenuItem(title: "Tile Windows", action: #selector(tile), keyEquivalent: "t")
-        tileItem.target = self
-        menu.addItem(tileItem)
-
-        let tileNoMain = NSMenuItem(title: "Tile (no browser)", action: #selector(tileNoMain), keyEquivalent: "")
-        tileNoMain.target = self
-        menu.addItem(tileNoMain)
-
+        item(menu, "Tile + Browser",  "t", #selector(tile))
+        item(menu, "Tile Grid",       "g", #selector(tileGrid))
         menu.addItem(NSMenuItem.separator())
-
-        let labelItem = NSMenuItem(title: "Label Sessions", action: #selector(label), keyEquivalent: "l")
-        labelItem.target = self
-        menu.addItem(labelItem)
-
-        let statusItem2 = NSMenuItem(title: "Status", action: #selector(status), keyEquivalent: "s")
-        statusItem2.target = self
-        menu.addItem(statusItem2)
-
-        let standupItem = NSMenuItem(title: "Standup", action: #selector(standup), keyEquivalent: "")
-        standupItem.target = self
-        menu.addItem(standupItem)
-
+        item(menu, "Label Tabs",      "l", #selector(label))
+        item(menu, "Standup",         "s", #selector(standup))
         menu.addItem(NSMenuItem.separator())
-
-        let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
-        quitItem.target = self
-        menu.addItem(quitItem)
+        item(menu, "Quit",            "q", #selector(quit))
 
         statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil  // restore left-click behavior
     }
 
-    @objc func tile() { runTd("tile") }
-    @objc func tileNoMain() { runTd("tile --no-main") }
-    @objc func label() { runTd("label") }
-    @objc func status() { runInTerminal("status") }
-    @objc func standup() { runInTerminal("standup") }
-    @objc func quit() { NSApp.terminate(nil) }
-
-    /// Run td command silently (no terminal output needed)
-    func runTd(_ subcmd: String) {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/bash")
-        task.arguments = ["-lc", "td \(subcmd)"]
-        try? task.run()
+    func item(_ menu: NSMenu, _ title: String, _ key: String, _ action: Selector) {
+        let mi = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        mi.target = self
+        menu.addItem(mi)
     }
 
-    /// Run td command in a visible iTerm tab (for commands with output)
-    func runInTerminal(_ subcmd: String) {
-        let script = """
+    @objc func tile()     { run("tile"); flash() }
+    @objc func tileGrid() { run("tile --no-main"); flash() }
+    @objc func label()    { run("label"); flash() }
+    @objc func standup()  { terminal("standup") }
+    @objc func quit()     { NSApp.terminate(nil) }
+
+    func run(_ cmd: String) {
+        let t = Process()
+        t.executableURL = URL(fileURLWithPath: "/bin/bash")
+        t.arguments = ["-lc", "td \(cmd)"]
+        try? t.run()
+    }
+
+    func terminal(_ cmd: String) {
+        let src = """
         tell application "iTerm2"
             activate
             tell current window
                 create tab with default profile
                 tell current session of current tab
-                    write text "td \(subcmd)"
+                    write text "td \(cmd)"
                 end tell
             end tell
         end tell
         """
-        var error: NSDictionary?
-        if let appleScript = NSAppleScript(source: script) {
-            appleScript.executeAndReturnError(&error)
+        var err: NSDictionary?
+        NSAppleScript(source: src)?.executeAndReturnError(&err)
+    }
+
+    func flash() {
+        guard let button = statusItem.button else { return }
+        let orig = button.image
+        button.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "done")
+        button.image?.size = NSSize(width: 16, height: 16)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            button.image = orig
+            button.image?.size = NSSize(width: 16, height: 16)
         }
     }
 }
 
 let app = NSApplication.shared
-let delegate = AppDelegate()
+let delegate = TD()
 app.delegate = delegate
 app.setActivationPolicy(.accessory)
 app.run()
