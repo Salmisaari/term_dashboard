@@ -13,7 +13,7 @@ struct FolderSession {
 
 class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var statusItem: NSStatusItem!
-    var autoTile = true
+    var autoTile = false
     let tdPath: String = {
         let bundle = Bundle.main.bundlePath  // .../menubar/TD.app
         let menubar = (bundle as NSString).deletingLastPathComponent  // .../menubar
@@ -30,7 +30,7 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var panel: KeyPanel?
     var folderField: NSTextField?
     var promptField: NSTextField?
-    var resultsPanel: KeyPanel?
+    var resultsPanel: NSPanel?
     var resultLabels: [NSTextField] = []
     var allFolders: [String] = []
     var filteredFolders: [String] = []
@@ -435,7 +435,11 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         field.isBezeled = false
         field.drawsBackground = false
         field.backgroundColor = .clear
+        field.maximumNumberOfLines = 1
+        field.usesSingleLineMode = true
         (field.cell as? NSTextFieldCell)?.drawsBackground = false
+        (field.cell as? NSTextFieldCell)?.isScrollable = true
+        (field.cell as? NSTextFieldCell)?.lineBreakMode = .byClipping
         field.textColor = NSColor.tertiaryLabelColor
         field.focusRingType = .none
         field.delegate = self
@@ -551,7 +555,7 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         let dropH = CGFloat(maxVisible) * rowH + pad
         let w = mainPanel.frame.width
 
-        let dp = KeyPanel(
+        let dp = NSPanel(
             contentRect: NSRect(
                 x: mainPanel.frame.minX,
                 y: mainPanel.frame.minY - dropH - 2,
@@ -645,8 +649,6 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
         mainPanel.addChildWindow(dp, ordered: .below)
         dp.orderFront(nil)
-
-        mainPanel.makeKeyAndOrderFront(nil)
     }
 
     func hideResults() {
@@ -869,12 +871,12 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 .replacingOccurrences(of: "\"", with: "\\\"")
             cmd = "cd \\\"\(safePath)\\\""
             if withGit {
-                cmd += " && git log --oneline --graph -20 ; claude"
+                cmd += " && git log --oneline --graph -20 ; claude --dangerously-skip-permissions"
             } else {
-                cmd += " && claude"
+                cmd += " && claude --dangerously-skip-permissions"
             }
         } else {
-            cmd = "claude"
+            cmd = "claude --dangerously-skip-permissions"
         }
         if !prompt.isEmpty {
             cmd += " \\\"\(safePrompt)\\\""
