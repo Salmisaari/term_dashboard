@@ -16,19 +16,31 @@ class TD: NSObject, NSApplicationDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
-        // Auto-tile when switching Spaces
+        // Auto-tile when switching Spaces (both notification paths for reliability)
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
             selector: #selector(spaceChanged),
             name: NSWorkspace.activeSpaceDidChangeNotification,
             object: nil
         )
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(spaceChanged),
+            name: NSNotification.Name("com.apple.screenIsUnlocked"),
+            object: nil
+        )
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(spaceChanged),
+            name: NSNotification.Name("com.apple.spaces.activeSpaceDidChange"),
+            object: nil
+        )
     }
 
     @objc func spaceChanged() {
         guard autoTile else { return }
-        // Short delay to let macOS finish the Space transition
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        // Delay so macOS finishes the transition and CGWindowList updates
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
             self.run("tile")
             self.flash()
         }
