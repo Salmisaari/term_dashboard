@@ -25,8 +25,8 @@ td_tile() {
   onscreen_data="$(get_onscreen_windows)"
 
   local iterm_ids browser_app
-  iterm_ids="$(echo "$onscreen_data" | grep '^ITERM:' | sed 's/^ITERM://')"
-  browser_app="$(echo "$onscreen_data" | grep '^BROWSER:' | sed 's/^BROWSER://' | sed -n '1p')"
+  iterm_ids="$(echo "$onscreen_data" | grep '^ITERM:' | sed 's/^ITERM://' || true)"
+  browser_app="$(echo "$onscreen_data" | grep '^BROWSER:' | sed 's/^BROWSER://' | sed -n '1p' || true)"
 
   # Override browser with flags
   if [[ -n "$main_app" ]]; then
