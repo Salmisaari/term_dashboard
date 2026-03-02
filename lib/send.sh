@@ -49,13 +49,18 @@ td_kick() {
     return 1
   fi
 
+  # Escape for AppleScript string
+  local safe_prompt
+  safe_prompt="${prompt//\\/\\\\}"
+  safe_prompt="${safe_prompt//\"/\\\"}"
+
   osascript <<APPLESCRIPT
 tell application "iTerm2"
     repeat with w in every window
         repeat with t in every tab of w
             repeat with s in every session of t
                 if tty of s is "$tty" then
-                    tell s to write text "$prompt"
+                    tell s to write text "$safe_prompt"
                     return "Sent"
                 end if
             end repeat
@@ -125,9 +130,32 @@ find_tty_for_project() {
   all_sessions="$(discover_all 2>/dev/null)" || true
   [[ -z "$all_sessions" ]] && return
 
+  # First pass: match by registered project name
   while IFS=$'\t' read -r tty win tab sess_id sess_name cwd proj claude; do
     [[ "$proj" == "-" ]] && proj=""
     if [[ "$proj" == "$project" ]]; then
+      echo "$tty"
+      return
+    fi
+  done <<< "$all_sessions"
+
+  # Second pass: match by folder path, prefer active Claude sessions
+  local target_path
+  target_path="$(cd "$HOME/Desktop/Code/$project" 2>/dev/null && pwd)" || return
+
+  # Prefer TTY with Claude running
+  while IFS=$'\t' read -r tty win tab sess_id sess_name cwd proj claude; do
+    [[ "$cwd" == "-" ]] && cwd=""
+    if [[ ("$cwd" == "$target_path" || "$cwd" == "$target_path/"*) && "$claude" == "active" ]]; then
+      echo "$tty"
+      return
+    fi
+  done <<< "$all_sessions"
+
+  # Fall back to any session in that directory
+  while IFS=$'\t' read -r tty win tab sess_id sess_name cwd proj claude; do
+    [[ "$cwd" == "-" ]] && cwd=""
+    if [[ "$cwd" == "$target_path" || "$cwd" == "$target_path/"* ]]; then
       echo "$tty"
       return
     fi

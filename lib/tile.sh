@@ -1,50 +1,41 @@
 #!/usr/bin/env bash
-# tile.sh — tile iTerm2 windows (current Space only), with optional main app
+# tile.sh — tile iTerm2 windows on current Space, auto-detect browser
 
 td_tile() {
   local gap=4
   local menu_bar=38
-  local main_app=""
   local main_pct=55
-  local tile_all=false
+  local no_main=false
 
   while [[ $# -gt 0 ]]; do
     case $1 in
       --gap) gap="$2"; shift 2 ;;
-      --menu-bar) menu_bar="$2"; shift 2 ;;
-      --with) main_app="$2"; shift 2 ;;
-      --no-main) main_app="NONE"; shift ;;
       --main-size) main_pct="$2"; shift 2 ;;
-      --all) tile_all=true; shift ;;
-      *) echo "Unknown option: $1"; return 1 ;;
+      --no-main) no_main=true; shift ;;
+      *) shift ;;
     esac
   done
 
-  # Get on-screen window info (current Space only) via CoreGraphics
+  # Detect what's on the current Space via CoreGraphics
   local onscreen_data
   onscreen_data="$(get_onscreen_windows)"
 
-  local iterm_ids browser_app
+  local iterm_ids
   iterm_ids="$(echo "$onscreen_data" | grep '^ITERM:' | sed 's/^ITERM://' || true)"
-  browser_app="$(echo "$onscreen_data" | grep '^BROWSER:' | sed 's/^BROWSER://' | sed -n '1p' || true)"
 
-  # Override browser with flags
-  if [[ -n "$main_app" ]]; then
-    if [[ "$main_app" == "NONE" ]]; then
-      browser_app=""
-    else
-      browser_app="$main_app"
-    fi
+  # Auto-detect browser on current Space
+  local browser_app=""
+  if [[ "$no_main" == false ]]; then
+    browser_app="$(echo "$onscreen_data" | grep '^BROWSER:' | sed 's/^BROWSER://' | sed -n '1p' || true)"
   fi
 
-  local id_filter=""
-  if [[ "$tile_all" == false ]]; then
-    if [[ -z "$iterm_ids" ]]; then
-      echo "No iTerm2 windows on current Space"
-      return
-    fi
-    id_filter="$(echo "$iterm_ids" | tr '\n' ',' | sed 's/,$//')"
+  if [[ -z "$iterm_ids" ]]; then
+    echo "No iTerm2 windows found"
+    return
   fi
+
+  local id_filter
+  id_filter="$(echo "$iterm_ids" | tr '\n' ',' | sed 's/,$//')"
 
   if [[ -n "$browser_app" ]]; then
     tile_layout "$gap" "$menu_bar" "$browser_app" "$main_pct" "$id_filter"
@@ -53,7 +44,7 @@ td_tile() {
   fi
 }
 
-# Use CoreGraphics via Swift to get on-screen windows (current Space only)
+# Detect windows on current Space via CoreGraphics
 get_onscreen_windows() {
   swift -e '
 import CoreGraphics
@@ -149,7 +140,6 @@ tell application "iTerm2"
 
     -- Calculate grid dimensions
     if hasMain then
-        -- Vertical stack for narrow left portion
         if winCount is 1 then
             set gridC to 1
             set gridR to 1
@@ -170,7 +160,6 @@ tell application "iTerm2"
             set gridR to ((winCount + 2) div 3)
         end if
     else
-        -- Full screen grid
         if winCount is 1 then
             set gridC to 1
             set gridR to 1
@@ -195,9 +184,22 @@ tell application "iTerm2"
         end if
     end if
 
+    -- Cap terminal width to half screen (terminals should never be wider than 50%)
+    set maxTermW to (usableW / 2) as integer
+
     -- Base cell sizes
-    set cellW to ((termAreaW - (gap * (gridC + 1))) / gridC) as integer
+    set rawCellW to ((termAreaW - (gap * (gridC + 1))) / gridC) as integer
+    if rawCellW > maxTermW then
+        set cellW to maxTermW
+    else
+        set cellW to rawCellW
+    end if
     set cellH to ((usableH - (gap * (gridR + 1))) / gridR) as integer
+
+    -- When width was capped and no main app, right-align the terminal grid
+    if not hasMain and cellW < rawCellW then
+        set termStartX to usableW - (gridC * cellW) - ((gridC + 1) * gap)
+    end if
 
     repeat with i from 1 to winCount
         set c to ((i - 1) mod gridC)
@@ -206,12 +208,7 @@ tell application "iTerm2"
         set x to termStartX + gap + (c * (cellW + gap))
         set y to topY + gap + (r * (cellH + gap))
 
-        -- Right edge: last column stretches to fill rounding gap
-        if c is (gridC - 1) then
-            set rightEdge to usableW - gap
-        else
-            set rightEdge to x + cellW
-        end if
+        set rightEdge to x + cellW
 
         -- Bottom edge: last row stretches to fill
         if r is (gridR - 1) then
