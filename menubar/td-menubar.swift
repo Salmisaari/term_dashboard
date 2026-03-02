@@ -3,6 +3,8 @@ import Cocoa
 class TD: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
 
+    var autoTile = true
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
@@ -12,6 +14,23 @@ class TD: NSObject, NSApplicationDelegate {
             button.action = #selector(clicked)
             button.target = self
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        }
+
+        // Auto-tile when switching Spaces
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(spaceChanged),
+            name: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil
+        )
+    }
+
+    @objc func spaceChanged() {
+        guard autoTile else { return }
+        // Short delay to let macOS finish the Space transition
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            self.run("tile")
+            self.flash()
         }
     }
 
@@ -37,6 +56,11 @@ class TD: NSObject, NSApplicationDelegate {
         item(menu, "Label Tabs",      "l", #selector(label))
         item(menu, "Standup",         "s", #selector(standup))
         menu.addItem(NSMenuItem.separator())
+        let autoItem = NSMenuItem(title: "Auto-tile on Space Switch", action: #selector(toggleAuto), keyEquivalent: "")
+        autoItem.target = self
+        autoItem.state = autoTile ? .on : .off
+        menu.addItem(autoItem)
+        menu.addItem(NSMenuItem.separator())
         item(menu, "Quit",            "q", #selector(quit))
 
         statusItem.menu = menu
@@ -54,6 +78,7 @@ class TD: NSObject, NSApplicationDelegate {
     @objc func tileGrid() { run("tile --no-main"); flash() }
     @objc func label()    { run("label"); flash() }
     @objc func standup()  { terminal("standup") }
+    @objc func toggleAuto() { autoTile.toggle() }
     @objc func quit()     { NSApp.terminate(nil) }
 
     func run(_ cmd: String) {
