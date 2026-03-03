@@ -139,13 +139,11 @@ tell application "iTerm2"
     end if
 
     -- Calculate grid dimensions
+    -- 1-3 terminals: single column (vertical stack), 4+ fills grid
     if hasMain then
-        if winCount is 1 then
+        if winCount is less than or equal to 3 then
             set gridC to 1
-            set gridR to 1
-        else if winCount is less than or equal to 2 then
-            set gridC to 1
-            set gridR to 2
+            set gridR to winCount
         else if winCount is less than or equal to 4 then
             set gridC to 2
             set gridR to 2
@@ -160,12 +158,9 @@ tell application "iTerm2"
             set gridR to ((winCount + 2) div 3)
         end if
     else
-        if winCount is 1 then
+        if winCount is less than or equal to 3 then
             set gridC to 1
-            set gridR to 1
-        else if winCount is 2 then
-            set gridC to 2
-            set gridR to 1
+            set gridR to winCount
         else if winCount is less than or equal to 4 then
             set gridC to 2
             set gridR to 2

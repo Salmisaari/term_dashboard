@@ -25,6 +25,10 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     let doubleClickInterval: TimeInterval = 0.3
     var singleClickTimer: Timer?
     var tileDebounce: Timer?
+    var lastCapsTime: Date?
+    let capsDoubleTap: TimeInterval = 0.35
+    var globalFlagsMonitor: Any?
+    var localFlagsMonitor: Any?
 
     // Quick Add — dynamic folder browser
     var panel: KeyPanel?
@@ -56,6 +60,27 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
+        // Hidden Edit menu so ⌘V/⌘C/⌘X/⌘A work in text fields
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let editMenuItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+        editMenuItem.submenu = editMenu
+        let mainMenu = NSMenu()
+        mainMenu.addItem(editMenuItem)
+        NSApp.mainMenu = mainMenu
+
+        // Global hotkey: double-tap Caps Lock to open Quick Add
+        globalFlagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.handleCapsLock(event)
+        }
+        localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.handleCapsLock(event)
+            return event
+        }
+
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(spaceChanged),
             name: NSWorkspace.activeSpaceDidChangeNotification, object: nil
@@ -68,6 +93,20 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             self, selector: #selector(spaceChanged),
             name: NSNotification.Name("com.apple.spaces.activeSpaceDidChange"), object: nil
         )
+    }
+
+    func handleCapsLock(_ event: NSEvent) {
+        guard event.keyCode == 57 else { return }  // Caps Lock keyCode
+        // Ignore if Quick Add panel is already open
+        if let p = panel, p.isVisible { return }
+
+        let now = Date()
+        if let last = lastCapsTime, now.timeIntervalSince(last) < capsDoubleTap {
+            lastCapsTime = nil
+            DispatchQueue.main.async { self.showQuickAdd() }
+        } else {
+            lastCapsTime = now
+        }
     }
 
     @objc func spaceChanged() {
@@ -511,9 +550,20 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     func controlTextDidChange(_ notification: Notification) {
         guard let field = notification.object as? NSTextField else { return }
 
-        // Typing in prompt → close dropdown
+        // Typing/pasting in prompt → close dropdown, flatten newlines
         if field.tag == 2 {
             hideResults()
+            let text = field.stringValue
+            if text.contains("\n") || text.contains("\r") {
+                let flat = text.replacingOccurrences(of: "\r\n", with: " ")
+                    .replacingOccurrences(of: "\n", with: " ")
+                    .replacingOccurrences(of: "\r", with: " ")
+                field.stringValue = flat
+                // Move cursor to end
+                if let editor = field.currentEditor() {
+                    editor.selectedRange = NSRange(location: flat.count, length: 0)
+                }
+            }
             return
         }
 
