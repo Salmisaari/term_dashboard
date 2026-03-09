@@ -4,10 +4,9 @@ class KeyPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
-// Session status for traffic-light indicators
 enum SessionStatus { case active, waiting }
 struct FolderSession {
-    let tty: String      // e.g. "/dev/ttys004"
+    let tty: String
     let status: SessionStatus
 }
 
@@ -15,9 +14,9 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var statusItem: NSStatusItem!
     var autoTile = false
     let tdPath: String = {
-        let bundle = Bundle.main.bundlePath  // .../menubar/TD.app
-        let menubar = (bundle as NSString).deletingLastPathComponent  // .../menubar
-        let root = (menubar as NSString).deletingLastPathComponent  // .../term_dashboard
+        let bundle = Bundle.main.bundlePath
+        let menubar = (bundle as NSString).deletingLastPathComponent
+        let root = (menubar as NSString).deletingLastPathComponent
         return (root as NSString).appendingPathComponent("td")
     }()
 
@@ -30,7 +29,7 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var globalFlagsMonitor: Any?
     var localFlagsMonitor: Any?
 
-    // Quick Add — dynamic folder browser
+    // Quick Add
     var panel: KeyPanel?
     var folderField: NSTextField?
     var promptField: NSTextField?
@@ -39,10 +38,15 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var allFolders: [String] = []
     var filteredFolders: [String] = []
     var selectedIndex: Int = -1
-    var selectedFolder: String?                     // persists across opens
-    var folderSessions: [String: FolderSession] = [:]  // live session status + TTY
+    var selectedFolder: String?
+    var folderSessions: [String: FolderSession] = [:]
     let codeDir = NSString(string: "~/Desktop/Code").expandingTildeInPath
     var keyMonitor: Any?
+
+    // Discovery state
+    var lastDiscoveryTime: Date?
+    let discoveryTTL: TimeInterval = 30
+    var isScanning = false
 
     // Pastel traffic-light colors
     let pastelGreen  = NSColor(red: 0.55, green: 0.85, blue: 0.55, alpha: 1.0)
@@ -62,9 +66,9 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
         // Hidden Edit menu so ⌘V/⌘C/⌘X/⌘A work in text fields
         let editMenu = NSMenu(title: "Edit")
-        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Cut",        action: #selector(NSText.cut(_:)),       keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy",       action: #selector(NSText.copy(_:)),      keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste",      action: #selector(NSText.paste(_:)),     keyEquivalent: "v")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         let editMenuItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
         editMenuItem.submenu = editMenu
@@ -93,11 +97,57 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             self, selector: #selector(spaceChanged),
             name: NSNotification.Name("com.apple.spaces.activeSpaceDidChange"), object: nil
         )
+
+        validateTdPath()
+        checkiTermPermission()
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        if let m = globalFlagsMonitor { NSEvent.removeMonitor(m) }
+        if let m = localFlagsMonitor  { NSEvent.removeMonitor(m) }
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        DistributedNotificationCenter.default().removeObserver(self)
+    }
+
+    // MARK: - Launch validation
+
+    func validateTdPath() {
+        guard FileManager.default.fileExists(atPath: tdPath) else {
+            let alert = NSAlert()
+            alert.messageText = "td script not found"
+            alert.informativeText = "Expected at:\n\(tdPath)\n\nMove TD.app back into the term_dashboard repo root."
+            alert.alertStyle = .warning
+            alert.runModal()
+            return
+        }
+    }
+
+    func checkiTermPermission() {
+        DispatchQueue.global(qos: .background).async {
+            let src = "tell application \"iTerm2\" to return name"
+            var err: NSDictionary?
+            NSAppleScript(source: src)?.executeAndReturnError(&err)
+            guard let error = err else { return }
+            let code = error[NSAppleScript.errorNumber] as? Int ?? 0
+            guard code == -1743 || code == -1744 else { return }
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "Automation permission needed"
+                alert.informativeText = "TD needs permission to control iTerm2.\n\nGo to System Settings → Privacy & Security → Automation and enable iTerm2 for TD."
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "Open System Settings")
+                alert.addButton(withTitle: "Dismiss")
+                if alert.runModal() == .alertFirstButtonReturn {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!)
+                }
+            }
+        }
+    }
+
+    // MARK: - Caps Lock
+
     func handleCapsLock(_ event: NSEvent) {
-        guard event.keyCode == 57 else { return }  // Caps Lock keyCode
-        // Ignore if Quick Add panel is already open
+        guard event.keyCode == 57 else { return }
         if let p = panel, p.isVisible { return }
 
         let now = Date()
@@ -111,7 +161,6 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     @objc func spaceChanged() {
         guard autoTile else { return }
-        // Debounce: multiple observers fire for same space switch — only tile once
         tileDebounce?.invalidate()
         tileDebounce = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { _ in
             if let p = self.panel, p.isVisible { return }
@@ -121,7 +170,6 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     }
 
     // MARK: - Click handling
-    // Single click = Quick Add, Double click = Menu
 
     @objc func clicked() {
         guard let event = NSApp.currentEvent else { return }
@@ -147,180 +195,137 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         }
     }
 
-    // MARK: - Folder scanning
+    // MARK: - Folder scanning (async, non-blocking)
 
-    func scanFolders() {
-        let fm = FileManager.default
-        guard let items = try? fm.contentsOfDirectory(atPath: codeDir) else {
-            allFolders = []
-            return
-        }
-        allFolders = items.filter { name in
-            var isDir: ObjCBool = false
-            let full = (codeDir as NSString).appendingPathComponent(name)
-            return fm.fileExists(atPath: full, isDirectory: &isDir) && isDir.boolValue && !name.hasPrefix(".")
-        }.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-    }
-
-    // MARK: - Active session discovery (ps + lsof, no AppleScript)
-
-    func discoverActiveFolders() {
+    func scanFolders(completion: @escaping ([String]) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
-            // Step 1: Find TTYs with "claude" process + CPU usage
-            let ps = Process()
-            ps.executableURL = URL(fileURLWithPath: "/bin/ps")
-            ps.arguments = ["-eo", "tty,comm,%cpu"]
-            let psPipe = Pipe()
-            ps.standardOutput = psPipe
-            ps.standardError = Pipe()
-            try? ps.run()
-            ps.waitUntilExit()
-
-            let psData = psPipe.fileHandleForReading.readDataToEndOfFile()
-            let psOut = String(data: psData, encoding: .utf8) ?? ""
-
-            // Group by TTY, take max CPU across claude processes on same TTY
-            var ttyCpu: [String: Double] = [:]
-            for line in psOut.split(separator: "\n") {
-                let parts = String(line).split(whereSeparator: { $0.isWhitespace }).map(String.init)
-                guard parts.count >= 3, parts[1] == "claude", parts[0].hasPrefix("ttys") else { continue }
-                let tty = parts[0]
-                let cpu = Double(parts[2]) ?? 0
-                ttyCpu[tty] = max(ttyCpu[tty] ?? 0, cpu)
-            }
-
-            guard !ttyCpu.isEmpty else {
-                DispatchQueue.main.async { self.folderSessions = [:] }
+            let fm = FileManager.default
+            guard let items = try? fm.contentsOfDirectory(atPath: self.codeDir) else {
+                DispatchQueue.main.async { completion([]) }
                 return
             }
+            let folders = items.filter { name in
+                var isDir: ObjCBool = false
+                let full = (self.codeDir as NSString).appendingPathComponent(name)
+                return fm.fileExists(atPath: full, isDirectory: &isDir) && isDir.boolValue && !name.hasPrefix(".")
+            }.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            DispatchQueue.main.async { completion(folders) }
+        }
+    }
 
-            // Step 2: For each TTY, find shell CWD and map to folder
-            var sessions: [String: FolderSession] = [:]
-            let prefix = self.codeDir + "/"
+    // MARK: - Active session discovery (1 ps + 1 batched lsof)
 
-            for (tty, cpu) in ttyCpu {
-                // Find shell PID on this TTY
-                let sh = Process()
-                sh.executableURL = URL(fileURLWithPath: "/bin/ps")
-                sh.arguments = ["-t", tty, "-o", "pid=,comm="]
-                let shPipe = Pipe()
-                sh.standardOutput = shPipe
-                sh.standardError = Pipe()
-                try? sh.run()
-                sh.waitUntilExit()
+    func discoverActiveFolders() {
+        // Respect TTL — skip if recently refreshed
+        if let last = lastDiscoveryTime, Date().timeIntervalSince(last) < discoveryTTL { return }
 
-                let shOut = String(data: shPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                var shellPid: String?
-                for line in shOut.split(separator: "\n") {
-                    let s = String(line).trimmingCharacters(in: .whitespaces)
-                    if s.contains("zsh") || s.contains("bash") {
-                        shellPid = s.split(whereSeparator: { $0.isWhitespace }).first.map(String.init)
-                        break
-                    }
-                }
-                guard let pid = shellPid else { continue }
-
-                // Get CWD via lsof
-                let lsof = Process()
-                lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-                lsof.arguments = ["-a", "-p", pid, "-d", "cwd", "-Fn"]
-                let lsofPipe = Pipe()
-                lsof.standardOutput = lsofPipe
-                lsof.standardError = Pipe()
-                try? lsof.run()
-                lsof.waitUntilExit()
-
-                let lsofOut = String(data: lsofPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                for line in lsofOut.split(separator: "\n") {
-                    let s = String(line)
-                    guard s.hasPrefix("n") else { continue }
-                    let path = String(s.dropFirst())
-                    guard path.hasPrefix(prefix) else { continue }
-                    let remainder = String(path.dropFirst(prefix.count))
-                    if let name = remainder.split(separator: "/").first {
-                        let folder = String(name)
-                        let status: SessionStatus = cpu > 1.0 ? .active : .waiting
-                        sessions[folder] = FolderSession(tty: "/dev/" + tty, status: status)
-                    }
-                }
-            }
-
+        isScanning = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let sessions = self.runDiscovery()
             DispatchQueue.main.async {
                 self.folderSessions = sessions
-                if self.resultsPanel?.isVisible == true {
-                    self.showResults()
-                }
+                self.lastDiscoveryTime = Date()
+                self.isScanning = false
+                if self.resultsPanel?.isVisible == true { self.showResults() }
             }
         }
     }
 
-    /// Synchronous TTY lookup for a folder — used at kick time for freshness
-    func findClaudeTTY(for folder: String) -> String? {
-        let targetPath = (codeDir as NSString).appendingPathComponent(folder)
-
-        // Find TTYs with claude
+    /// Core discovery: 1 ps + 1 batched lsof for all claude TTYs
+    private func runDiscovery() -> [String: FolderSession] {
+        // Single ps for all processes
         let ps = Process()
         ps.executableURL = URL(fileURLWithPath: "/bin/ps")
-        ps.arguments = ["-eo", "tty,comm"]
+        ps.arguments = ["-eo", "tty,pid,comm,%cpu"]
         let psPipe = Pipe()
         ps.standardOutput = psPipe
         ps.standardError = Pipe()
-        try? ps.run()
-        ps.waitUntilExit()
-
+        try? ps.run(); ps.waitUntilExit()
         let psOut = String(data: psPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        var claudeTTYs: [String] = []
+
+        // Parse: TTY → max claude CPU, TTY → first shell PID
+        var ttyCpu: [String: Double] = [:]
+        var ttyShellPids: [String: String] = [:]
         for line in psOut.split(separator: "\n") {
             let parts = String(line).split(whereSeparator: { $0.isWhitespace }).map(String.init)
-            guard parts.count >= 2, parts[1] == "claude", parts[0].hasPrefix("ttys") else { continue }
-            claudeTTYs.append(parts[0])
+            guard parts.count >= 4, parts[0].hasPrefix("ttys") else { continue }
+            let tty = parts[0]; let pid = parts[1]; let comm = parts[2]; let cpu = Double(parts[3]) ?? 0
+            if comm == "claude" { ttyCpu[tty] = max(ttyCpu[tty] ?? 0, cpu) }
+            if (comm == "zsh" || comm == "bash") && ttyShellPids[tty] == nil { ttyShellPids[tty] = pid }
         }
 
-        for tty in claudeTTYs {
-            let sh = Process()
-            sh.executableURL = URL(fileURLWithPath: "/bin/ps")
-            sh.arguments = ["-t", tty, "-o", "pid=,comm="]
-            let shPipe = Pipe()
-            sh.standardOutput = shPipe
-            sh.standardError = Pipe()
-            try? sh.run()
-            sh.waitUntilExit()
+        guard !ttyCpu.isEmpty else { return [:] }
 
-            let shOut = String(data: shPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            var shellPid: String?
-            for line in shOut.split(separator: "\n") {
-                let s = String(line).trimmingCharacters(in: .whitespaces)
-                if s.contains("zsh") || s.contains("bash") {
-                    shellPid = s.split(whereSeparator: { $0.isWhitespace }).first.map(String.init)
-                    break
-                }
-            }
-            guard let pid = shellPid else { continue }
+        // Batch lsof for all shell PIDs on claude TTYs in one call
+        let pids = ttyCpu.keys.compactMap { ttyShellPids[$0] }
+        guard !pids.isEmpty else { return [:] }
 
-            let lsof = Process()
-            lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-            lsof.arguments = ["-a", "-p", pid, "-d", "cwd", "-Fn"]
-            let lsofPipe = Pipe()
-            lsof.standardOutput = lsofPipe
-            lsof.standardError = Pipe()
-            try? lsof.run()
-            lsof.waitUntilExit()
+        let lsof = Process()
+        lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        lsof.arguments = ["-a", "-p", pids.joined(separator: ","), "-d", "cwd", "-Fn"]
+        let lsofPipe = Pipe()
+        lsof.standardOutput = lsofPipe
+        lsof.standardError = Pipe()
+        try? lsof.run(); lsof.waitUntilExit()
+        let lsofOut = String(data: lsofPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
 
-            let lsofOut = String(data: lsofPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            for line in lsofOut.split(separator: "\n") {
-                let s = String(line)
-                guard s.hasPrefix("n") else { continue }
-                let cwd = String(s.dropFirst())
-                if cwd == targetPath || cwd.hasPrefix(targetPath + "/") {
-                    return "/dev/" + tty
-                }
+        // Parse pid→cwd from lsof -Fn output (p<pid>\nfcwd\nn<path>)
+        var pidCwd: [String: String] = [:]
+        var currentPid: String?
+        for line in lsofOut.split(separator: "\n") {
+            let s = String(line)
+            if s.hasPrefix("p") { currentPid = String(s.dropFirst()) }
+            else if s.hasPrefix("n"), let pid = currentPid { pidCwd[pid] = String(s.dropFirst()) }
+        }
+
+        // Map TTY → folder name
+        let prefix = codeDir + "/"
+        var sessions: [String: FolderSession] = [:]
+        for (tty, cpu) in ttyCpu {
+            guard let pid = ttyShellPids[tty], let cwd = pidCwd[pid] else { continue }
+            guard cwd.hasPrefix(prefix) else { continue }
+            let remainder = String(cwd.dropFirst(prefix.count))
+            if let name = remainder.split(separator: "/").first {
+                sessions[String(name)] = FolderSession(tty: "/dev/" + tty, status: cpu > 1.0 ? .active : .waiting)
             }
         }
-        return nil
+        return sessions
     }
 
-    /// Send text to an iTerm session by TTY path — tries NSAppleScript first, shell fallback
+    // MARK: - TTY lookup for a specific folder (reuses batched discovery)
+
+    func findClaudeTTY(for folder: String) -> String? {
+        let sessions = runDiscovery()
+        DispatchQueue.main.async {
+            self.folderSessions = sessions
+            self.lastDiscoveryTime = Date()
+        }
+        return sessions[folder]?.tty
+    }
+
+    // MARK: - Verify claude is still the foreground process on a TTY
+
+    func verifyClaudeOnTTY(_ tty: String) -> Bool {
+        let ttyShort = tty.hasPrefix("/dev/") ? String(tty.dropFirst(5)) : tty
+        let ps = Process()
+        ps.executableURL = URL(fileURLWithPath: "/bin/ps")
+        ps.arguments = ["-t", ttyShort, "-o", "comm="]
+        let pipe = Pipe()
+        ps.standardOutput = pipe
+        ps.standardError = Pipe()
+        try? ps.run(); ps.waitUntilExit()
+        let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        return out.split(separator: "\n")
+            .map { String($0).trimmingCharacters(in: .whitespaces) }
+            .contains("claude")
+    }
+
+    // MARK: - Send text to an iTerm session by TTY
+
     func kickSession(tty: String, prompt: String, folder: String = "") -> Bool {
+        // Verify claude is actually running on this TTY before sending
+        guard verifyClaudeOnTTY(tty) else { return false }
+
         let safe = prompt
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
@@ -346,8 +351,9 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         if let result = NSAppleScript(source: src)?.executeAndReturnError(&err) {
             if result.stringValue == "Sent" { return true }
         }
+        if let e = err { fputs("kickSession AppleScript error: \(e)\n", stderr) }
 
-        // Fallback: shell-based td kick (uses osascript subprocess)
+        // Fallback: shell-based td kick
         if !folder.isEmpty {
             let safeF = folder.replacingOccurrences(of: "'", with: "'\\''")
             let safeP = prompt.replacingOccurrences(of: "'", with: "'\\''")
@@ -357,8 +363,7 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             let pipe = Pipe()
             proc.standardOutput = pipe
             proc.standardError = Pipe()
-            try? proc.run()
-            proc.waitUntilExit()
+            try? proc.run(); proc.waitUntilExit()
             let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
             if out.contains("Sent") { return true }
         }
@@ -372,24 +377,18 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         if let existing = panel, existing.isVisible {
             existing.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
-            if selectedFolder != nil {
-                promptField?.selectText(nil)
-            } else {
-                folderField?.selectText(nil)
-            }
+            if selectedFolder != nil { promptField?.selectText(nil) }
+            else { folderField?.selectText(nil) }
             return
         }
 
-        // Clean up panel UI but preserve selectedFolder
         let rememberedFolder = selectedFolder
         closeQuickAdd()
         selectedFolder = rememberedFolder
 
-        scanFolders()
         selectedIndex = -1
         filteredFolders = []
 
-        // Shift held → force folder picker even if folder is remembered
         let shiftHeld = NSEvent.modifierFlags.contains(.shift)
         let useRemembered = selectedFolder != nil && !shiftHeld
 
@@ -397,10 +396,7 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         let h: CGFloat = 52
         var origin = NSPoint(x: 200, y: 200)
         if let buttonFrame = statusItem.button?.window?.frame {
-            origin = NSPoint(
-                x: buttonFrame.maxX - w,
-                y: buttonFrame.minY - h - 4
-            )
+            origin = NSPoint(x: buttonFrame.maxX - w, y: buttonFrame.minY - h - 4)
         }
 
         let p = KeyPanel(
@@ -440,62 +436,57 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         bg.appearance = NSAppearance(named: .darkAqua)
         inner.addSubview(bg)
 
-        // "> " prefix label
-        let prefix = NSTextField(frame: NSRect(x: 12, y: h - 24, width: 16, height: 18))
-        prefix.stringValue = ">"
-        prefix.isEditable = false
-        prefix.isSelectable = false
-        prefix.isBezeled = false
-        prefix.drawsBackground = false
-        prefix.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
-        prefix.textColor = NSColor.secondaryLabelColor
-        inner.addSubview(prefix)
+        let prefixLabel = NSTextField(frame: NSRect(x: 12, y: h - 24, width: 16, height: 18))
+        prefixLabel.stringValue = ">"
+        prefixLabel.isEditable = false
+        prefixLabel.isSelectable = false
+        prefixLabel.isBezeled = false
+        prefixLabel.drawsBackground = false
+        prefixLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+        prefixLabel.textColor = NSColor.secondaryLabelColor
+        inner.addSubview(prefixLabel)
 
-        // Folder search field
-        let folder = NSTextField(frame: NSRect(x: 24, y: h - 24, width: w - 36, height: 18))
-        folder.placeholderString = "search folders..."
-        folder.stringValue = ""
-        folder.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
-        folder.isBezeled = false
-        folder.drawsBackground = false
-        folder.backgroundColor = .clear
-        (folder.cell as? NSTextFieldCell)?.drawsBackground = false
-        folder.textColor = .white
-        folder.focusRingType = .none
-        folder.delegate = self
-        folder.tag = 1
-        inner.addSubview(folder)
-        folderField = folder
+        let folderTF = NSTextField(frame: NSRect(x: 24, y: h - 24, width: w - 36, height: 18))
+        folderTF.placeholderString = "search folders..."
+        folderTF.stringValue = ""
+        folderTF.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+        folderTF.isBezeled = false
+        folderTF.drawsBackground = false
+        folderTF.backgroundColor = .clear
+        (folderTF.cell as? NSTextFieldCell)?.drawsBackground = false
+        folderTF.textColor = .white
+        folderTF.focusRingType = .none
+        folderTF.delegate = self
+        folderTF.tag = 1
+        inner.addSubview(folderTF)
+        folderField = folderTF
 
-        // Prompt field (grayed until folder picked)
-        let field = NSTextField(frame: NSRect(x: 12, y: 6, width: w - 24, height: 20))
-        field.placeholderString = "prompt  \u{21A9}"
-        field.font = NSFont.systemFont(ofSize: 13)
-        field.isBezeled = false
-        field.drawsBackground = false
-        field.backgroundColor = .clear
-        field.maximumNumberOfLines = 1
-        field.usesSingleLineMode = true
-        (field.cell as? NSTextFieldCell)?.drawsBackground = false
-        (field.cell as? NSTextFieldCell)?.isScrollable = true
-        (field.cell as? NSTextFieldCell)?.lineBreakMode = .byClipping
-        field.textColor = NSColor.tertiaryLabelColor
-        field.focusRingType = .none
-        field.delegate = self
-        field.tag = 2
-        field.isEnabled = false
-        inner.addSubview(field)
+        let promptTF = NSTextField(frame: NSRect(x: 12, y: 6, width: w - 24, height: 20))
+        promptTF.placeholderString = "prompt  \u{21A9}"
+        promptTF.font = NSFont.systemFont(ofSize: 13)
+        promptTF.isBezeled = false
+        promptTF.drawsBackground = false
+        promptTF.backgroundColor = .clear
+        promptTF.maximumNumberOfLines = 1
+        promptTF.usesSingleLineMode = true
+        (promptTF.cell as? NSTextFieldCell)?.drawsBackground = false
+        (promptTF.cell as? NSTextFieldCell)?.isScrollable = true
+        (promptTF.cell as? NSTextFieldCell)?.lineBreakMode = .byClipping
+        promptTF.textColor = NSColor.tertiaryLabelColor
+        promptTF.focusRingType = .none
+        promptTF.delegate = self
+        promptTF.tag = 2
+        promptTF.isEnabled = false
+        inner.addSubview(promptTF)
 
         p.contentView = outer
         panel = p
-        promptField = field
+        promptField = promptTF
 
-        // Monitor ⌘+Enter for git-tree mode
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self, let panel = self.panel, panel.isVisible else { return event }
             if event.keyCode == 36, event.modifierFlags.contains(.command) {
-                if let editor = self.promptField?.currentEditor(),
-                   editor == panel.firstResponder {
+                if let editor = self.promptField?.currentEditor(), editor == panel.firstResponder {
                     self.submitQuickAdd(withGit: true)
                     return nil
                 }
@@ -506,18 +497,32 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         p.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
-        // Remembered folder → show it, focus prompt directly
+        // Pre-populate remembered folder synchronously for instant UX
         if useRemembered, let remembered = selectedFolder {
-            folder.stringValue = remembered
-            field.isEnabled = true
-            field.textColor = .white
-            field.becomeFirstResponder()
+            folderTF.stringValue = remembered
+            promptTF.isEnabled = true
+            promptTF.textColor = .white
+            promptTF.becomeFirstResponder()
         } else {
-            selectedFolder = nil
-            folder.becomeFirstResponder()
+            folderTF.becomeFirstResponder()
         }
 
-        // Discover active Claude sessions in background
+        // Async folder scan — validate remembered folder + populate list
+        scanFolders { [weak self] folders in
+            guard let self = self, self.panel != nil else { return }
+            self.allFolders = folders
+
+            // Invalidate remembered folder if it no longer exists on disk
+            if let remembered = self.selectedFolder, !folders.contains(remembered) {
+                self.selectedFolder = nil
+                self.folderField?.stringValue = ""
+                self.promptField?.isEnabled = false
+                self.promptField?.textColor = .tertiaryLabelColor
+                self.folderField?.becomeFirstResponder()
+            }
+        }
+
+        // Respect TTL before re-discovering sessions
         discoverActiveFolders()
     }
 
@@ -527,14 +532,10 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         panel = nil
         folderField = nil
         promptField = nil
-        // selectedFolder persists across opens — remembered for next time
-        if let monitor = keyMonitor {
-            NSEvent.removeMonitor(monitor)
-            keyMonitor = nil
-        }
+        if let monitor = keyMonitor { NSEvent.removeMonitor(monitor); keyMonitor = nil }
     }
 
-    // MARK: - Sorting helper
+    // MARK: - Sorting
 
     func sortedWithSessions(_ folders: [String]) -> [String] {
         folders.sorted { a, b in
@@ -550,16 +551,15 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     func controlTextDidChange(_ notification: Notification) {
         guard let field = notification.object as? NSTextField else { return }
 
-        // Typing/pasting in prompt → close dropdown, flatten newlines
         if field.tag == 2 {
             hideResults()
             let text = field.stringValue
             if text.contains("\n") || text.contains("\r") {
-                let flat = text.replacingOccurrences(of: "\r\n", with: " ")
+                let flat = text
+                    .replacingOccurrences(of: "\r\n", with: " ")
                     .replacingOccurrences(of: "\n", with: " ")
                     .replacingOccurrences(of: "\r", with: " ")
                 field.stringValue = flat
-                // Move cursor to end
                 if let editor = field.currentEditor() {
                     editor.selectedRange = NSRange(location: flat.count, length: 0)
                 }
@@ -569,7 +569,6 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
         guard field.tag == 1 else { return }
 
-        // User is re-typing — reset folder selection
         if selectedFolder != nil {
             selectedFolder = nil
             promptField?.isEnabled = false
@@ -577,22 +576,11 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         }
 
         let query = field.stringValue.trimmingCharacters(in: .whitespaces)
-        let base: [String]
-        if query.isEmpty {
-            base = allFolders
-        } else {
-            base = allFolders.filter {
-                $0.localizedCaseInsensitiveContains(query)
-            }
-        }
+        let base = query.isEmpty ? allFolders : allFolders.filter { $0.localizedCaseInsensitiveContains(query) }
         filteredFolders = sortedWithSessions(base)
         selectedIndex = filteredFolders.isEmpty ? -1 : 0
 
-        if filteredFolders.isEmpty {
-            hideResults()
-        } else {
-            showResults()
-        }
+        if filteredFolders.isEmpty { hideResults() } else { showResults() }
     }
 
     func showResults() {
@@ -609,8 +597,7 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             contentRect: NSRect(
                 x: mainPanel.frame.minX,
                 y: mainPanel.frame.minY - dropH - 2,
-                width: w,
-                height: dropH
+                width: w, height: dropH
             ),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false
@@ -655,21 +642,16 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             let lbl = NSTextField(frame: NSRect(x: 0, y: y, width: w, height: rowH))
             let name = filteredFolders[i]
             let isHighlighted = (i == selectedIndex)
-            let textColor: NSColor = isHighlighted ? .white : NSColor.secondaryLabelColor
 
-            // Build attributed string with pastel traffic-light dot
             let attrStr = NSMutableAttributedString()
             if let session = folderSessions[name] {
                 let dotColor: NSColor = session.status == .active ? pastelGreen : pastelYellow
-                attrStr.append(NSAttributedString(string: " \u{25CF} ", attributes: [
-                    .foregroundColor: dotColor,
-                    .font: monoFont
-                ]))
+                attrStr.append(NSAttributedString(string: " \u{25CF} ", attributes: [.foregroundColor: dotColor, .font: monoFont]))
             } else {
                 attrStr.append(NSAttributedString(string: "   ", attributes: [.font: monoFont]))
             }
             attrStr.append(NSAttributedString(string: name, attributes: [
-                .foregroundColor: textColor,
+                .foregroundColor: isHighlighted ? NSColor.white : NSColor.secondaryLabelColor,
                 .font: monoFont
             ]))
 
@@ -679,12 +661,7 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             lbl.isBezeled = false
             lbl.drawsBackground = true
             lbl.lineBreakMode = .byTruncatingTail
-
-            if isHighlighted {
-                lbl.backgroundColor = NSColor.white.withAlphaComponent(0.15)
-            } else {
-                lbl.backgroundColor = .clear
-            }
+            lbl.backgroundColor = isHighlighted ? NSColor.white.withAlphaComponent(0.15) : .clear
 
             let click = NSClickGestureRecognizer(target: self, action: #selector(resultClicked(_:)))
             lbl.addGestureRecognizer(click)
@@ -696,16 +673,12 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
         dp.contentView = outer
         resultsPanel = dp
-
         mainPanel.addChildWindow(dp, ordered: .below)
         dp.orderFront(nil)
     }
 
     func hideResults() {
-        if let dp = resultsPanel {
-            panel?.removeChildWindow(dp)
-            dp.close()
-        }
+        if let dp = resultsPanel { panel?.removeChildWindow(dp); dp.close() }
         resultsPanel = nil
         resultLabels = []
     }
@@ -721,7 +694,6 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         selectedFolder = filteredFolders[selectedIndex]
         folderField?.stringValue = selectedFolder!
         hideResults()
-
         promptField?.isEnabled = true
         promptField?.textColor = .white
         panel?.makeKeyAndOrderFront(nil)
@@ -734,20 +706,16 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             guard i < filteredFolders.count else { continue }
             let name = filteredFolders[i]
             let isHighlighted = (i == selectedIndex)
-            let textColor: NSColor = isHighlighted ? .white : NSColor.secondaryLabelColor
 
             let attrStr = NSMutableAttributedString()
             if let session = folderSessions[name] {
                 let dotColor: NSColor = session.status == .active ? pastelGreen : pastelYellow
-                attrStr.append(NSAttributedString(string: " \u{25CF} ", attributes: [
-                    .foregroundColor: dotColor,
-                    .font: monoFont
-                ]))
+                attrStr.append(NSAttributedString(string: " \u{25CF} ", attributes: [.foregroundColor: dotColor, .font: monoFont]))
             } else {
                 attrStr.append(NSAttributedString(string: "   ", attributes: [.font: monoFont]))
             }
             attrStr.append(NSAttributedString(string: name, attributes: [
-                .foregroundColor: textColor,
+                .foregroundColor: isHighlighted ? NSColor.white : NSColor.secondaryLabelColor,
                 .font: monoFont
             ]))
 
@@ -762,18 +730,15 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         let isFolder = (control as? NSTextField)?.tag == 1
         let isPrompt = (control as? NSTextField)?.tag == 2
 
-        // Escape → close everything
         if sel == #selector(NSResponder.cancelOperation(_:)) {
             closeQuickAdd()
             return true
         }
 
-        // Enter
         if sel == #selector(NSResponder.insertNewline(_:)) {
             if isFolder {
                 let typed = folderField?.stringValue.trimmingCharacters(in: .whitespaces) ?? ""
                 if typed.isEmpty {
-                    // No folder — fresh session
                     selectedFolder = nil
                     hideResults()
                     promptField?.isEnabled = true
@@ -783,7 +748,6 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 } else if selectedIndex >= 0, selectedIndex < filteredFolders.count {
                     selectFolder()
                 } else if !allFolders.contains(typed) {
-                    // New folder — create it
                     let path = (codeDir as NSString).appendingPathComponent(typed)
                     try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
                     allFolders.append(typed)
@@ -797,13 +761,9 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 }
                 return true
             }
-            if isPrompt {
-                submitQuickAdd(withGit: false)
-                return true
-            }
+            if isPrompt { submitQuickAdd(withGit: false); return true }
         }
 
-        // Tab
         if sel == #selector(NSResponder.insertTab(_:)) {
             if isPrompt {
                 panel?.makeKeyAndOrderFront(nil)
@@ -817,7 +777,6 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                     hideResults()
                     promptField?.becomeFirstResponder()
                 } else if typed.isEmpty {
-                    // Empty → fresh session
                     selectedFolder = nil
                     hideResults()
                     promptField?.isEnabled = true
@@ -831,7 +790,6 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             }
         }
 
-        // Arrow keys in folder field → navigate dropdown
         if isFolder {
             if sel == #selector(NSResponder.moveDown(_:)) {
                 if filteredFolders.isEmpty && !allFolders.isEmpty {
@@ -863,7 +821,6 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         let prompt = promptField?.stringValue ?? ""
         closeQuickAdd()
 
-        // No folder — fresh Claude session
         guard let folder = folder else {
             startClaude(path: nil, prompt: prompt, withGit: withGit)
             flash()
@@ -872,39 +829,37 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
         let path = (codeDir as NSString).appendingPathComponent(folder)
 
-        // Try to kick to existing Claude session (direct NSAppleScript — no subprocess)
         if !prompt.isEmpty {
-            // Use cached TTY first, fall back to fresh lookup
             let cachedTTY = folderSessions[folder]?.tty
 
-            DispatchQueue.global(qos: .userInitiated).async {
-                var kicked = false
+            let doKick = { [weak self] in
+                guard let self = self else { return }
+                DispatchQueue.global(qos: .userInitiated).async {
+                    var kicked = false
 
-                // Try cached TTY
-                if let tty = cachedTTY {
-                    DispatchQueue.main.sync { kicked = self.kickSession(tty: tty, prompt: prompt, folder: folder) }
-                }
+                    if let tty = cachedTTY {
+                        kicked = self.kickSession(tty: tty, prompt: prompt, folder: folder)
+                    }
+                    if !kicked, let freshTTY = self.findClaudeTTY(for: folder) {
+                        kicked = self.kickSession(tty: freshTTY, prompt: prompt, folder: folder)
+                    }
 
-                // If cached failed, try fresh lookup
-                if !kicked {
-                    if let freshTTY = self.findClaudeTTY(for: folder) {
-                        DispatchQueue.main.sync { kicked = self.kickSession(tty: freshTTY, prompt: prompt, folder: folder) }
+                    DispatchQueue.main.async {
+                        if kicked { self.flash() }
+                        else { self.startClaude(path: path, prompt: prompt, withGit: withGit); self.flash() }
                     }
                 }
+            }
 
-                DispatchQueue.main.async {
-                    if kicked {
-                        self.flash()
-                    } else {
-                        self.startClaude(path: path, prompt: prompt, withGit: withGit)
-                        self.flash()
-                    }
-                }
+            // Wait for in-progress scan (up to 500ms) before kicking
+            if isScanning {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { doKick() }
+            } else {
+                doKick()
             }
             return
         }
 
-        // No prompt: just open new iTerm + claude
         startClaude(path: path, prompt: prompt, withGit: withGit)
         flash()
     }
@@ -919,18 +874,16 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             let safePath = path
                 .replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "\"", with: "\\\"")
-            cmd = "cd \\\"\(safePath)\\\""
+            cmd = "ulimit -n 65536 ; cd \\\"\(safePath)\\\""
             if withGit {
                 cmd += " && git log --oneline --graph -20 ; claude --dangerously-skip-permissions"
             } else {
                 cmd += " && claude --dangerously-skip-permissions"
             }
         } else {
-            cmd = "claude --dangerously-skip-permissions"
+            cmd = "ulimit -n 65536 ; claude --dangerously-skip-permissions"
         }
-        if !prompt.isEmpty {
-            cmd += " \\\"\(safePrompt)\\\""
-        }
+        if !prompt.isEmpty { cmd += " \\\"\(safePrompt)\\\"" }
 
         let src = """
         tell application "iTerm2"
@@ -941,8 +894,12 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             activate
         end tell
         """
-        var err: NSDictionary?
-        NSAppleScript(source: src)?.executeAndReturnError(&err)
+        // Dispatch off main thread — AppleScript/iTerm2 IPC can take 100–500ms
+        DispatchQueue.global(qos: .userInitiated).async {
+            var err: NSDictionary?
+            NSAppleScript(source: src)?.executeAndReturnError(&err)
+            if let e = err { fputs("startClaude AppleScript error: \(e)\n", stderr) }
+        }
     }
 
     // MARK: - Menu
@@ -951,7 +908,7 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         let menu = NSMenu()
         menu.minimumWidth = 140
 
-        item(menu, "Quick Add",  "n", #selector(openQuickAdd))
+        item(menu, "Quick Add", "n", #selector(openQuickAdd))
         item(menu, "Tile Up",   "t", #selector(tile))
         menu.addItem(NSMenuItem.separator())
         item(menu, "Quit",      "q", #selector(quit))
@@ -961,86 +918,15 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         statusItem.menu = nil
     }
 
-    /// Synchronous session refresh (used by Quick Add dropdown)
-    func refreshSessionsSync() {
-        let ps = Process()
-        ps.executableURL = URL(fileURLWithPath: "/bin/ps")
-        ps.arguments = ["-eo", "tty,comm,%cpu"]
-        let psPipe = Pipe()
-        ps.standardOutput = psPipe
-        ps.standardError = Pipe()
-        try? ps.run()
-        ps.waitUntilExit()
-
-        let psOut = String(data: psPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        var ttyCpu: [String: Double] = [:]
-        for line in psOut.split(separator: "\n") {
-            let parts = String(line).split(whereSeparator: { $0.isWhitespace }).map(String.init)
-            guard parts.count >= 3, parts[1] == "claude", parts[0].hasPrefix("ttys") else { continue }
-            let tty = parts[0]
-            let cpu = Double(parts[2]) ?? 0
-            ttyCpu[tty] = max(ttyCpu[tty] ?? 0, cpu)
-        }
-
-        var sessions: [String: FolderSession] = [:]
-        let prefix = codeDir + "/"
-
-        for (tty, cpu) in ttyCpu {
-            let sh = Process()
-            sh.executableURL = URL(fileURLWithPath: "/bin/ps")
-            sh.arguments = ["-t", tty, "-o", "pid=,comm="]
-            let shPipe = Pipe()
-            sh.standardOutput = shPipe
-            sh.standardError = Pipe()
-            try? sh.run()
-            sh.waitUntilExit()
-
-            let shOut = String(data: shPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            var shellPid: String?
-            for line in shOut.split(separator: "\n") {
-                let s = String(line).trimmingCharacters(in: .whitespaces)
-                if s.contains("zsh") || s.contains("bash") {
-                    shellPid = s.split(whereSeparator: { $0.isWhitespace }).first.map(String.init)
-                    break
-                }
-            }
-            guard let pid = shellPid else { continue }
-
-            let lsof = Process()
-            lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-            lsof.arguments = ["-a", "-p", pid, "-d", "cwd", "-Fn"]
-            let lsofPipe = Pipe()
-            lsof.standardOutput = lsofPipe
-            lsof.standardError = Pipe()
-            try? lsof.run()
-            lsof.waitUntilExit()
-
-            let lsofOut = String(data: lsofPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            for line in lsofOut.split(separator: "\n") {
-                let s = String(line)
-                guard s.hasPrefix("n") else { continue }
-                let path = String(s.dropFirst())
-                guard path.hasPrefix(prefix) else { continue }
-                let remainder = String(path.dropFirst(prefix.count))
-                if let name = remainder.split(separator: "/").first {
-                    let folder = String(name)
-                    let status: SessionStatus = cpu > 1.0 ? .active : .waiting
-                    sessions[folder] = FolderSession(tty: "/dev/" + tty, status: status)
-                }
-            }
-        }
-        folderSessions = sessions
-    }
-
     func item(_ menu: NSMenu, _ title: String, _ key: String, _ action: Selector) {
         let mi = NSMenuItem(title: title, action: action, keyEquivalent: key)
         mi.target = self
         menu.addItem(mi)
     }
 
-    @objc func tile()        { run("tile"); flash() }
-    @objc func openQuickAdd(){ showQuickAdd() }
-    @objc func quit()        { NSApp.terminate(nil) }
+    @objc func tile()         { run("tile"); flash() }
+    @objc func openQuickAdd() { showQuickAdd() }
+    @objc func quit()         { NSApp.terminate(nil) }
 
     func run(_ cmd: String) {
         let t = Process()
@@ -1051,15 +937,13 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     func flash() {
         guard let button = statusItem.button else { return }
-        let gridIcon = NSImage(systemSymbolName: "square.grid.2x2", accessibilityDescription: "td")
-        gridIcon?.size = NSSize(width: 16, height: 16)
+        let gridIcon  = NSImage(systemSymbolName: "square.grid.2x2", accessibilityDescription: "td")
+        gridIcon?.size  = NSSize(width: 16, height: 16)
         let checkIcon = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "done")
         checkIcon?.size = NSSize(width: 16, height: 16)
 
         button.image = checkIcon
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
-            button.image = gridIcon
-        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { button.image = gridIcon }
     }
 }
 
