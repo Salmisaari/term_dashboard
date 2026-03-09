@@ -450,10 +450,10 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         bg.blendingMode = .behindWindow
         bg.state = .active
         bg.appearance = NSAppearance(named: .darkAqua)
-        bg.wantsLayer = true
-        bg.layer?.cornerRadius = 10
-        bg.layer?.cornerCurve = .continuous
-        bg.layer?.masksToBounds = true
+        let bgMask = CAShapeLayer()
+        bgMask.path = CGPath(roundedRect: CGRect(x: 0, y: 0, width: w, height: h),
+                             cornerWidth: 10, cornerHeight: 10, transform: nil)
+        bg.layer?.mask = bgMask
         inner.addSubview(bg)
 
         let prefixLabel = NSTextField(frame: NSRect(x: 12, y: h - 24, width: 16, height: 18))
@@ -653,10 +653,10 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         bg.blendingMode = .behindWindow
         bg.state = .active
         bg.appearance = NSAppearance(named: .darkAqua)
-        bg.wantsLayer = true
-        bg.layer?.cornerRadius = 10
-        bg.layer?.cornerCurve = .continuous
-        bg.layer?.masksToBounds = true
+        let bgMask = CAShapeLayer()
+        bgMask.path = CGPath(roundedRect: CGRect(x: 0, y: 0, width: w, height: dropH),
+                             cornerWidth: 10, cornerHeight: 10, transform: nil)
+        bg.layer?.mask = bgMask
         inner.addSubview(bg)
 
         let monoFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
