@@ -14,10 +14,25 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var statusItem: NSStatusItem!
     var autoTile = false
     let tdPath: String = {
+        // 1. ~/bin/td (installed by install.sh)
+        let home = NSString(string: "~/bin/td").expandingTildeInPath
+        if FileManager.default.fileExists(atPath: home) { return home }
+        // 2. relative to bundle (dev: TD.app lives next to td in repo)
         let bundle = Bundle.main.bundlePath
         let menubar = (bundle as NSString).deletingLastPathComponent
         let root = (menubar as NSString).deletingLastPathComponent
-        return (root as NSString).appendingPathComponent("td")
+        let relative = (root as NSString).appendingPathComponent("td")
+        if FileManager.default.fileExists(atPath: relative) { return relative }
+        // 3. PATH lookup
+        let which = Process()
+        which.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        which.arguments = ["td"]
+        let pipe = Pipe()
+        which.standardOutput = pipe; which.standardError = Pipe()
+        try? which.run(); which.waitUntilExit()
+        let found = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return found.isEmpty ? home : found
     }()
 
     var lastClickTime: Date?

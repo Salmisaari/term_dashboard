@@ -261,7 +261,12 @@ td_menubar() {
         echo "Built."
       fi
 
-      open "$app_dir"
+      # Sync to /Applications so it's launchable from Spotlight/Finder
+      if [[ -d /Applications ]]; then
+        cp -R "$app_dir" /Applications/TD.app 2>/dev/null || true
+      fi
+
+      open /Applications/TD.app 2>/dev/null || open "$app_dir"
       echo "Menu bar app launched (⌘td in top bar)"
       ;;
     stop)
