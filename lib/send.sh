@@ -93,16 +93,40 @@ td_start() {
       continue
     fi
 
-    osascript <<APPLESCRIPT
+    # Get the TTY of the new session so we can send /effort max later
+    local new_tty
+    new_tty="$(osascript <<APPLESCRIPT
 tell application "iTerm2"
     set newWindow to (create window with default profile)
     tell current session of current tab of newWindow
-        write text "cd ${path} && clear"
+        write text "cd ${path} && clear && claude"
+        return tty
     end tell
-    activate
 end tell
 APPLESCRIPT
-    echo "Opened window for $project → $path"
+    )"
+    echo "Opened window for $project → $path (launching Claude Code)"
+
+    # Background: wait for Claude to initialize, then send /effort max
+    if [[ -n "$new_tty" ]]; then
+      (
+        sleep 6
+        osascript <<APPLESCRIPT
+tell application "iTerm2"
+    repeat with w in every window
+        repeat with t in every tab of w
+            repeat with s in every session of t
+                if tty of s is "${new_tty}" then
+                    tell s to write text "/effort max"
+                    return "Sent"
+                end if
+            end repeat
+        end repeat
+    end repeat
+end tell
+APPLESCRIPT
+      ) &
+    fi
   done
 }
 

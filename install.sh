@@ -92,7 +92,31 @@ else
   echo "Skipped hook installation. You can add them manually later."
 fi
 
-# ── 5. Verify PATH ──────────────────────────────────────────────────
+# ── 5. Add iTerm2 title hook to ~/.zshrc ────────────────────────────
+
+ZSHRC="${HOME}/.zshrc"
+TITLE_SRC="${TD_DIR}/lib/title.sh"
+TITLE_LINE="source \"${TITLE_SRC}\""
+TITLE_MARK="# td iTerm2 title hook"
+
+echo ""
+if [[ -f "$ZSHRC" ]] && grep -Fq "$TITLE_MARK" "$ZSHRC"; then
+  echo "✓ iTerm2 title hook already sourced in $ZSHRC"
+else
+  read -rp "Add iTerm2 title hook (static folder name) to ${ZSHRC}? [y/N] " answer
+  if [[ "$answer" =~ ^[Yy] ]]; then
+    {
+      echo ""
+      echo "$TITLE_MARK"
+      echo "$TITLE_LINE"
+    } >> "$ZSHRC"
+    echo "Added to $ZSHRC. Open a new iTerm2 window to see the title."
+  else
+    echo "Skipped. Source it manually with: $TITLE_LINE"
+  fi
+fi
+
+# ── 6. Verify PATH ──────────────────────────────────────────────────
 
 echo ""
 if echo "$PATH" | tr ':' '\n' | grep -q "^${BIN_DIR}$"; then
