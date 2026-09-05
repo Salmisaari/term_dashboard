@@ -202,10 +202,10 @@ td menubar stop     # Quit
 ```
 
 **Menu bar features:**
-- **Click** → Tile windows
-- **Right-click / long press** → Open menu (tile, label, standup, quit)
-- **Caps Lock double-tap** → Quick Add panel: browse `~/Desktop/Code/`, kick a project
-- Traffic light indicators per session: green (active Claude), yellow (waiting), gray (shell)
+- **Click** → Compact Quick Add bar; click its session count for the workspace
+- **Right-click** → Quick Add, sessions, tiling, auto-tile, quit
+- **Caps Lock double-tap** → Quick Add panel: browse `~/Desktop/Code/`, click `>` or the provider name to choose Claude/Claudex/Codex/Hermes (each launches interactively in no-permission mode), and type multiline prompts that expand vertically
+- Session rows show exact terminals and recent agent reports; a running process alone does not imply progress
 
 The first launch compiles the Swift source — takes ~10 seconds. Subsequent launches are instant.
 
@@ -282,7 +282,8 @@ term_dashboard/
 │   ├── send.sh          # Prompt sending / window focus
 │   └── status.sh        # Status display, standup, project management
 ├── menubar/
-│   └── td-menubar.swift # Menu bar app (compiled on first use)
+│   ├── td-workspace.swift # Native compact workspace
+│   └── launch.sh          # Build and launch the menu app
 ├── hooks/
 │   └── td-hook.sh       # Claude Code hook script
 └── tests/
@@ -292,17 +293,17 @@ term_dashboard/
 ## Terminal workspace and agent navigation
 
 ```bash
-td dashboard             # Open the local terminal workspace
-td dashboard --demo      # Try Edward's isolated coordination walkthrough
+td menubar               # Native workspace in your existing top bar
+td menubar demo          # Isolated Edward walkthrough, also in the top bar
 td sessions              # JSON inventory for any agent or script
 ```
 
-The workspace adds a calm overview, searchable terminal inventory, one pinned focus,
-on-demand terminal inspection, and a selectable agent navigator. Enable navigation,
-copy the handoff into that agent, and its reports and proposed prompts arrive in the
-same workspace. Pause navigation to revoke the handoff. Every delivered prompt gets
-a receipt; task completion needs its own evidence.
+The dark two-line bar stays compact. Click its count to see sessions and updates;
+choose a terminal to inspect it, hold one focus, or enable an agent navigator.
+Copy the handoff into that agent. Its reports and proposed prompts arrive in the
+same panel. Pause revokes navigation; approved prompts get submission receipts.
+Quick Add keeps the provider picker, multiline drafts, and awake timer.
 
-Requires Python 3.9+ with no additional runtime dependencies. Existing CLI commands
-and the menu bar app continue to work. See [the workspace guide](docs/agent-workspace.md)
-for agent commands, terminal support, freshness, and optional launch-at-login setup.
+The native app uses Python 3.9+ with no extra packages and needs no web server.
+`td dashboard` remains an optional browser surface. See [the workspace guide](docs/agent-workspace.md)
+for keyboard controls, the agent contract, terminal support, and verification.

@@ -43,7 +43,7 @@ td — Term Dashboard
 Usage: td [command] [args]
 
 Commands:
-  dashboard    Open the calm terminal workspace (--demo for Edward walkthrough)
+  dashboard    Optional browser workspace (the native home is td menubar)
   sessions     Structured live terminal inventory (JSON)
   session      Focus, read, pin, or acknowledge an exact terminal session
   agent        Portable navigator contract, reports, and proposed handoffs
@@ -222,13 +222,16 @@ show_help_menubar() {
   cat <<'EOF'
 td menubar — Menu bar app for quick access
 
-  Builds and launches a lightweight macOS menu bar app showing ⌘td.
-  Click it to tile windows, label sessions, or run standup.
+  Opens the compact native terminal workspace in your top bar.
+  Click the count for sessions, updates, and agent navigation.
+  Double-tap Caps Lock for Quick Add; right-click for tiling.
 
 Usage:
   td menubar           Build (if needed) and launch
   td menubar start     Same as above
-  td menubar stop      Quit the menu bar app
+  td menubar stop      Quit the menu bar app; terminals keep running
+  td menubar demo      Separate, isolated Edward walkthrough
+  td menubar build     Compile without replacing the running app
 EOF
 }
 

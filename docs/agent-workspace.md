@@ -1,24 +1,32 @@
 # Terminal workspace
 
-Run `td dashboard` to open a local workspace at <http://127.0.0.1:7373>.
-It runs in the background and needs Python 3.9+; there are no packages to install.
-Run `td dashboard --demo` for the isolated Edward walkthrough at port 7374.
+Run `td menubar` to update and open TD in your existing menu bar. The native AppKit
+panel starts at 400 × 52 points, matching the original Quick Add bar. It talks
+directly to the Python workspace; no browser, web server, model API key, or package
+installation is needed. Python 3.9+ and the existing Swift compiler are required.
 
 ## The human loop
 
-- **Overview:** one next action, your chosen focus, five nearby sessions, and a few recent receipts.
-- **All terminals:** search by project, provider, path, title, or TTY. Each terminal has its own identity, including two terminals in the same Edward project.
-- **Terminal details:** open its native window, inspect bounded visible output, pin it as your focus, or acknowledge its latest report. Parking for 30 minutes also releases a pin.
-- **Navigator:** select an agent terminal and enable navigation. Copy the generated handoff into that exact agent. “Ready” means access is enabled; “Connected” means the agent checked in in the last 90 seconds. “Quiet” means its check-in is older. Enabling access does not start a model worker.
-- **Activity:** review proposed prompts with their exact destination and text. Approve sends only to an agent with a fresh `waiting` report for the same process instance. A successful delivery is a submission receipt, not a claim that the task finished.
+- **Quick Add:** double-tap Caps Lock or click the TD grid icon. Choose a project under Desktop/Code, choose Claude/Claudex/Codex/Hermes, and enter a prompt. Return launches; Shift–Return adds a line. The existing harness launch flags are retained. Hermes starts interactively before receiving its initial prompt.
+- **Sessions:** click the count chip to expand the same panel. The first number is the terminal count; the second is new updates. Search by project, provider, path, title, or TTY. Two Edward terminals remain separate rows.
+- **Details:** choose a terminal, Open or Inspect it, Hold one focus, mark its update Seen, or park it for 30 minutes with Later. Existing-session drafts use **copy & open** so you can paste when the agent is ready. Drafts remain in memory when you close the panel or switch terminals; they are not persisted after quitting TD.
+- **Navigation:** choose an agent terminal and turn on **Let this agent navigate**, then **Copy handoff** and paste it into that agent. Awaiting check-in means the grant is ready; Checked in means the agent used it within 90 seconds. Quiet and Disconnected are explicit. Turning on the grant does not start a hidden model worker.
+- **Updates:** agent reports, recent receipts, and proposed prompts appear here. Review shows the exact destination and full prompt. Approve requires a fresh waiting report for that process instance. A receipt confirms submission; completion needs the agent's evidence.
+- **Pause:** revoke the navigator from any expanded view, including during discovery or an outage. This cancels pending proposals and invalidates the old handoff; it cannot undo a prompt already delivered or interrupt work already started.
+- **Awake:** the header timer holds display wakefulness for 1, 4, or 24 hours. Right-click the menu icon for tiling, optional auto-tile on Space changes, and Quit.
 
-Navigation can always be paused, including during a discovery outage. Pausing or switching the navigator revokes the previous token and cancels its pending proposals. It cannot undo an already delivered prompt or interrupt work an agent already started.
+Keyboard: `⌘L` sessions/search, `⌘N` new terminal, `⌘R` refresh, arrows then Return
+to select a search result, Shift–Return for a new prompt line, Escape to step back
+or collapse. The panel restores drafts, avoids pop-up notifications and animations,
+and shows failures inline. Quitting TD leaves your terminals running.
 
-Keyboard: `1` overview, `2` terminals, `3` activity, `/` search, `Esc` close a dialog. Shortcuts leave text entry alone. Reduced-motion preferences are respected.
+`td menubar demo` opens a separate native menu item with isolated Edward data.
+The Updates tab includes **Try Edward's check-in** to exercise report → proposal →
+review → receipt. Demo controls never touch your real terminals or awake timer.
 
 ## Give any agent the map
 
-Copy the handoff from the dashboard. It includes the workspace location, a revocable token, the exact controller identity, and these provider-neutral commands:
+Copy the handoff from the selected terminal in the menu panel. It includes the workspace location, a revocable token, the exact controller identity, and these provider-neutral commands:
 
 ```bash
 td agent context                           # timestamped inventory, reports, proposals, receipts
@@ -35,7 +43,7 @@ Agent controls use `TD_AGENT_TOKEN` from the handoff. Prefer the environment var
 
 The handoff asks the navigator to inspect at most six sessions in its first pass, surface one next action, and stop when a decision is needed. Continued watching requires a user instruction and check-ins at least once a minute. There is no hidden recurring model call, provider API key, or automatic outbound messaging.
 
-`td sessions` is the same structured inventory for scripts. Human CLI controls use `td session focus|read|pin|acknowledge|snooze '<ID>'`. Agent commands deliberately omit approval/delivery and navigator configuration. The browser owns those decisions. This is a managed application contract, not an OS sandbox: a process with general shell/filesystem access is still capable of bypassing the application.
+`td sessions` is the same structured inventory for scripts. Human CLI controls use `td session focus|read|pin|acknowledge|snooze '<ID>'`. Agent commands deliberately omit approval/delivery and navigator configuration. The native panel owns those decisions; the optional browser exposes the same controls. This is a managed application contract, not an OS sandbox: a process with general shell/filesystem access is still capable of bypassing the application.
 
 ## Terminal support and freshness
 
@@ -47,9 +55,17 @@ The handoff asks the navigator to inspect at most six sessions in its first pass
 
 Projects use iTerm's current directory when available, then process CWD, then a title label. Registered projects use the longest matching directory boundary. Agent detection uses executable identity rather than title text; Codex helper processes are excluded. A Python-hosted custom agent without a recognizable executable may appear as a shell until an adapter is added.
 
-Discovery runs every five seconds. Partial adapter failures preserve that adapter's last-known sessions as stale; actions are disabled. Global failures retain the last overview. Closed sessions leave an activity receipt. Terminal content is fetched only on inspection; the last 100 lines / 16 KB are returned with common credential patterns masked. Masking is best effort, so treat terminal content as sensitive and untrusted.
+Native discovery runs every five seconds while the panel is open and every fifteen seconds while it is tucked away. Partial adapter failures preserve that adapter's last-known sessions as stale; actions are disabled. Global failures retain the last overview. Closed sessions leave an activity receipt. Terminal content is fetched only on inspection; the last 100 lines / 16 KB are returned with common credential patterns masked. Masking is best effort, so treat terminal content as sensitive and untrusted.
 
 ## Lifetime and local data
+
+The native app requires no background HTTP service. Launch it normally through
+`td menubar` or `/Applications/TD.app`; `td menubar stop` quits it. The build happens
+before the old app is stopped. Its executable is backed up at
+`~/.config/td/menubar-before-workspace/TD` on the first workspace update.
+
+The earlier browser surface remains optional:
+
 
 ```bash
 td dashboard status           # service health and URL
@@ -74,9 +90,22 @@ The HTTP service binds to `127.0.0.1` only. Requests require the exact Host, sam
 
 ```bash
 python3 -B -I tests/test_workspace.py
+python3 -B -I tests/test_native.py
+bash tests/test-menubar.sh
 bash tests/test-tile.sh
 bash -n td
 node --check dashboard/static/app.js
 ```
 
 The behavior tests cover identity, restarts, revocation, freshness, evidence, persistent notes, explicit review, duplicate/concurrent delivery, uncertain outcomes, demo isolation, and HTTP boundaries. `tests/test-workspace-browser.py` is an optional browser walkthrough using Playwright and a separate Chrome instance; it requires `pip install playwright` and Chrome. It starts its own isolated demo service and never opens or controls live terminals.
+
+The AppKit check compiles the actual native view code, clicks its controls, and
+exercises Edward's isolated workflow without a web server. It also checks duplicate
+terminal search, arrow selection, multiline drafts, clipboard handoff, revocation,
+and failure recovery. Native PNGs are written to `/tmp/td-native-*.png` (override
+with `TD_NATIVE_ARTIFACTS`). Live prompt launch/delivery is tested with a mocked
+bridge to avoid submitting unsolicited work to your agents.
+
+The active native source is `menubar/td-workspace.swift`. The older local
+`td-menubar.swift` was cloud-offloaded and could not be read; it is retained intact.
+The new entry point preserves the documented Quick Add/provider/awake/tiling flow.

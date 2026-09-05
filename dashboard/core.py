@@ -1,4 +1,4 @@
-"""Shared workspace state for the browser and provider-neutral agent CLI."""
+"""Shared workspace state for the native menu panel, optional browser, and agent CLI."""
 from contextlib import contextmanager
 import hmac
 import json
@@ -270,7 +270,7 @@ report on your own session, and stop when the next step needs the user. If asked
 to keep watching, check authorization before each pass and report at least every
 60 seconds. Stop immediately on revocation, stale discovery, or disconnection.
 You may read and focus supported sessions, report, and propose prompts. Proposed
-prompts require human review in the dashboard; you cannot approve or deliver them
+prompts require human review in TD's menu-bar Updates tab; you cannot approve or deliver them
 through the agent interface. Never use another tool to bypass these boundaries.
 A delivery receipt only proves submission, never task completion.
 '''}
