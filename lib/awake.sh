@@ -7,8 +7,9 @@ AWAKE_STATE_FILE="${CONFIG_DIR}/awake.state"
 _awake_read() {
   local key="$1"
   if [[ -f "$AWAKE_STATE_FILE" ]]; then
-    jq -r ".${key} // empty" "$AWAKE_STATE_FILE" 2>/dev/null
+    jq -r ".${key} // empty" "$AWAKE_STATE_FILE" 2>/dev/null || true
   fi
+  return 0
 }
 
 _awake_write() {
@@ -18,7 +19,14 @@ _awake_write() {
 
 _awake_kill_existing() {
   local pid; pid="$(_awake_read pid)"
-  [[ -n "$pid" && "$pid" != "0" ]] && kill "$pid" 2>/dev/null || true
+  _awake_is_live "$pid" && kill "$pid" 2>/dev/null || true
+}
+
+_awake_is_live() {
+  local pid="$1" awake_command
+  [[ "$pid" =~ ^[1-9][0-9]*$ && "$pid" != "1" ]] || return 1
+  awake_command="$(/bin/ps -p "$pid" -o comm= 2>/dev/null)" || return 1
+  [[ "${awake_command##*/}" == "caffeinate" ]] && kill -0 "$pid" 2>/dev/null
 }
 
 _awake_next() {
@@ -47,8 +55,8 @@ td_awake() {
 
   # If state file says active but caffeinate is dead, treat as off
   local cur_pid; cur_pid="$(_awake_read pid)"
-  if [[ "$current" != "off" && -n "$cur_pid" && "$cur_pid" != "0" ]]; then
-    kill -0 "$cur_pid" 2>/dev/null || current="off"
+  if [[ "$current" != "off" ]]; then
+    _awake_is_live "$cur_pid" || current="off"
   fi
 
   # No arg → cycle

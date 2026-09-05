@@ -698,6 +698,10 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         }
     }
 }
+if CommandLine.arguments.contains("--version") {
+    print("TD native workspace 2.0")
+    exit(0)
+}
 let application = NSApplication.shared
 let delegate = TD()
 application.delegate = delegate

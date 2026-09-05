@@ -17,7 +17,6 @@ import webbrowser
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 from dashboard.bridge import MacBridge, DemoBridge, BridgeError, ROOT
 from dashboard.core import Workspace, WorkspaceError
-from dashboard.server import Server
 from dashboard.native import dispatch
 
 
@@ -60,6 +59,7 @@ def healthy(url, demo):
 
 
 def launch(args, config):
+    from dashboard.server import Server
     port = args.port or (7374 if args.demo else 7373)
     if not 1024 <= port <= 65535:
         raise WorkspaceError("Choose a port between 1024 and 65535.")

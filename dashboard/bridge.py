@@ -25,6 +25,16 @@ def run(argv, timeout=12):
     return result.stdout
 
 
+def is_awake_process(pid):
+    """A stale/reused PID must not be presented as an active awake timer."""
+    if not isinstance(pid, int) or pid <= 1:
+        return False
+    try:
+        return Path(run(["/bin/ps", "-p", str(pid), "-o", "comm="], timeout=2).strip()).name == "caffeinate"
+    except BridgeError:
+        return False
+
+
 ITERM_DISCOVERY = '''
 use framework "Foundation"
 use scripting additions

@@ -10,6 +10,11 @@ controls expand only through an explicit action. Background errors use a small
 amber indicator on the session button; click it for details. Receipts do not add
 rows to the main view. Multiline drafts can still grow as you type.
 
+The installed app includes its Python and shell companion under
+`TD.app/Contents/Resources`. It keeps working when the development checkout is
+cloud-offloaded. Agent handoffs point to this bundled companion. The normal
+development `td` command remains available from the repository.
+
 ## The human loop
 
 - **Quick Add:** double-tap Caps Lock or click the TD grid icon. Choose a project under Desktop/Code, choose Claude/Claudex/Codex/Hermes, and enter a prompt. Return launches; Shift–Return adds a line. The existing harness launch flags are retained. Hermes starts interactively before receiving its initial prompt.
@@ -24,6 +29,11 @@ Keyboard: `⌘L` sessions/search, `⌘N` new terminal, `⌘R` refresh, arrows th
 to select a search result, Shift–Return for a new prompt line, Escape to step back
 or collapse. The panel restores drafts, avoids pop-up notifications and animations,
 and shows failures inline. Quitting TD leaves your terminals running.
+
+Opening the inventory and stepping back preserve your draft's destination.
+Wrapped prompts grow up to five lines, then scroll. Refresh keeps selected terminal
+text available for copying. An unfinished project search must be resolved before
+launch; a late receipt cannot erase a newer draft.
 
 `td menubar demo` opens a separate native menu item with isolated Edward data.
 The Updates tab includes **Try Edward's check-in** to exercise report → proposal →
@@ -65,8 +75,9 @@ Native discovery runs every five seconds while the panel is open and every fifte
 ## Lifetime and local data
 
 The native app requires no background HTTP service. Launch it normally through
-`td menubar` or `/Applications/TD.app`; `td menubar stop` quits it. The build happens
-before the old app is stopped. Its executable is backed up at
+`td menubar` or `/Applications/TD.app`; `td menubar stop` quits it. The build is assembled in `~/Library/Caches/term-dashboard/TD.app`, outside
+iCloud Desktop. Its signature and bundled runtime are checked before the old app
+is stopped. Its executable is backed up at
 `~/.config/td/menubar-before-workspace/TD` on the first workspace update.
 
 The earlier browser surface remains optional:

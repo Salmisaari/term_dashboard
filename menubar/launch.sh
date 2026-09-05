@@ -13,13 +13,18 @@ case "$action" in
 esac
 src="$ROOT/menubar/td-workspace.swift"
 bin="$ROOT/menubar/td-menubar"
-app="$ROOT/menubar/TD.app"
+# iCloud can re-add Finder metadata while signing a bundle on Desktop.
+# Keep the verified build outside the source checkout as well as the installed runtime.
+app="$HOME/Library/Caches/term-dashboard/TD.app"
 if [[ ! -x "$bin" || "$src" -nt "$bin" ]]; then
   build_dir="$(mktemp -d /tmp/td-menubar-build.XXXXXX)"
   trap 'rm -rf "$build_dir"' EXIT
   echo 'Building native terminal workspace…'
   swiftc "$src" -o "$build_dir/TD" -framework Cocoa
   codesign --verify "$build_dir/TD"
+  [[ "$("$build_dir/TD" --version)" == 'TD native workspace 2.0' ]] || {
+    echo 'The compiled app did not pass its startup check.' >&2; exit 1;
+  }
   backup="${TD_CONFIG_DIR:-$HOME/.config/td}/menubar-before-workspace"
   if [[ ! -e "$backup/TD" && -f /Applications/TD.app/Contents/MacOS/TD ]]; then
     mkdir -p "$backup"
@@ -28,10 +33,16 @@ if [[ ! -x "$bin" || "$src" -nt "$bin" ]]; then
   fi
   cp "$build_dir/TD" "$bin"
 fi
-if [[ "$action" == build ]]; then echo "Built: $bin"; exit 0; fi
 # Assemble and sign before replacing the active application. Never delete the bundle.
 mkdir -p "$app/Contents/MacOS"
 cp "$bin" "$app/Contents/MacOS/TD"
+mkdir -p "$app/Contents/Resources/dashboard" "$app/Contents/Resources/lib"
+cp "$ROOT/menubar/runtime.sh" "$app/Contents/Resources/td"
+chmod 755 "$app/Contents/Resources/td"
+for module in __init__ bridge core native cli; do
+  cp "$ROOT/dashboard/$module.py" "$app/Contents/Resources/dashboard/$module.py"
+done
+cp "$ROOT/lib/awake.sh" "$ROOT/lib/tile.sh" "$app/Contents/Resources/lib/"
 cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -49,6 +60,21 @@ xattr -dr com.apple.FinderInfo "$app" 2>/dev/null || true
 xattr -dr com.apple.ResourceFork "$app" 2>/dev/null || true
 codesign --force --sign - --identifier com.td.menubar "$app"
 codesign --verify --strict "$app"
+# Verify the packaged companion without touching live terminals or requiring a browser.
+python3 -B -I - "$app/Contents/Resources/td" <<'PY'
+import json, os, subprocess, sys, tempfile
+with tempfile.TemporaryDirectory(prefix="td-bundle-check-") as config:
+    result = subprocess.run([sys.argv[1], "workspace", "--demo"], input="{}", text=True,
+                            capture_output=True, cwd="/", timeout=15,
+                            env=dict(os.environ, TD_CONFIG_DIR=config))
+    if result.returncode:
+        raise SystemExit("Bundled workspace check failed: " + result.stderr)
+    state = json.loads(result.stdout)["state"]
+    if not state["demo"] or state["counts"]["total"] != 6:
+        raise SystemExit("Bundled workspace returned an unexpected demo inventory.")
+print("Bundled workspace verified.")
+PY
+if [[ "$action" == build ]]; then echo "Built: $app"; exit 0; fi
 if [[ "$action" == demo ]]; then
   open -n "$app" --args --demo --show
   echo 'Edward demo opened in a separate TD menu item. Real terminals are untouched.'
@@ -62,6 +88,10 @@ if [[ -w /Applications ]]; then
   cp "$app/Contents/Info.plist" /Applications/TD.app/Contents/Info.plist
   mkdir -p /Applications/TD.app/Contents/_CodeSignature
   cp "$app/Contents/_CodeSignature/CodeResources" /Applications/TD.app/Contents/_CodeSignature/CodeResources
+  mkdir -p /Applications/TD.app/Contents/Resources/dashboard /Applications/TD.app/Contents/Resources/lib
+  cp "$app/Contents/Resources/td" /Applications/TD.app/Contents/Resources/td
+  cp "$app/Contents/Resources/dashboard/"*.py /Applications/TD.app/Contents/Resources/dashboard/
+  cp "$app/Contents/Resources/lib/"*.sh /Applications/TD.app/Contents/Resources/lib/
   installed=/Applications/TD.app
 fi
 xattr -dr com.apple.FinderInfo "$installed" 2>/dev/null || true

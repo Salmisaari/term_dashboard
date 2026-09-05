@@ -64,3 +64,12 @@ Live sessions render with exact IDs; duplicate Edward sessions remain distinct. 
 - Single-click regression fixed: restore native window presentation in `show()`, and keep only snapshot rendering offscreen. The new actual status-button click check fails against the previous commit and passes after the fix; the opened panel accepts keyboard input and the Edward workflow remains green.
 
 - Minimal main view is now an invariant: normal opening collapses prior views, background discovery/permission errors cannot expand it, and receipts use the existing session indicator. Explicit session/menu/search actions reveal the workspace. AppKit checks cover all of these transitions while retaining the selected terminal and draft.
+
+- Independent completion audit: inventory/back navigation now retains the exact draft destination; wrapped prompts stay readable within a five-line limit; refresh preserves terminal text selection; unfinished folder searches cannot launch in the old project; late launch receipts cannot erase edited drafts. All are covered by the native interaction checks.
+- Packaging the companion inside `TD.app` removes the native app's runtime dependency on the iCloud-backed checkout. Build validation exercises that standalone companion in an isolated Edward workspace before replacing the running app. Awake validation covers first use, malformed state, and stale PIDs so unrelated processes are never stopped.
+
+- Completion checks: 40 Python tests pass, including the standalone bundled CLI, folder-access failures, and real macOS awake-process identity. The full AppKit Edward workflow passes with the compact/open/close and interruption cases. Current tiling source passes independent-display, no-main, and browser-filtering checks with window mutation mocked.
+
+- Build staging also moved out of iCloud Desktop after Finder metadata was re-added during signing. The installer validates both the compiled entry point and the packaged runtime before stopping the existing app.
+
+- Installed-bundle verification passed: signature, native version handshake, first-class bundled companion, Edward check-in → reviewed prompt → receipt → revoke, and handoff commands pointing inside `/Applications/TD.app`. Normal user opening remains compact. Any macOS Automation/Desktop consent remains a human OS step, reachable through the compact status indicator; it does not stop independent demo or runtime verification.

@@ -100,10 +100,17 @@ def dispatch(work, request):
     state = work.view()
     # Folder metadata only; no recursive scans, file contents, or terminal output in polling.
     root = Path.home() / "Desktop/Code"
+    folder_error = None
     try:
         folders = [{"name": p.name, "path": str(p)} for p in root.iterdir()
                    if not p.name.startswith(".") and p.is_dir()]
+    except PermissionError:
+        folders = []
+        folder_error = "Allow TD access to Desktop in macOS Privacy & Security → Files & Folders."
     except OSError:
         folders = []
+        folder_error = "Project folders are unavailable. Check that Desktop/Code is accessible."
+    if folder_error:
+        state["folders_error"] = folder_error
     state["folders"] = sorted(folders, key=lambda p: p["name"].lower())
     return {"result": result, "state": state}

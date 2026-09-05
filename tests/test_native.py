@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """Native transport behavior, exercised without opening or messaging real terminals."""
 import json
+import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
-from dashboard.bridge import DemoBridge, MacBridge
+from dashboard.bridge import DemoBridge, MacBridge, is_awake_process
 from dashboard.core import Workspace, WorkspaceError
 from dashboard.native import dispatch, launch_command
 
@@ -81,6 +84,82 @@ class NativeTest(unittest.TestCase):
         self.call("state")
         with patch.object(self.bridge, "discover", side_effect=AssertionError("Permission is missing")):
             self.assertEqual(len(self.call("cached")["state"]["sessions"]), 6)
+
+    def test_standalone_native_runtime_and_first_awake_use(self):
+        source = Path(__file__).resolve().parent.parent
+        runtime = Path(self.temp.name) / "standalone"
+        (runtime / "dashboard").mkdir(parents=True)
+        (runtime / "lib").mkdir()
+        for name in ("__init__", "bridge", "core", "native", "cli"):
+            shutil.copyfile(source / "dashboard" / (name + ".py"), runtime / "dashboard" / (name + ".py"))
+        shutil.copyfile(source / "menubar/runtime.sh", runtime / "td")
+        shutil.copyfile(source / "lib/awake.sh", runtime / "lib/awake.sh")
+        (runtime / "td").chmod(0o755)
+        env = dict(os.environ, TD_CONFIG_DIR=str(Path(self.temp.name) / "standalone-state"))
+        def invoke(*args, payload=None):
+            return subprocess.run([str(runtime / "td"), *args], input=json.dumps(payload or {}),
+                                  capture_output=True, text=True, env=env, cwd="/", timeout=10)
+        result = invoke("workspace", "--demo")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(json.loads(result.stdout)["state"]["sessions"]), 6)
+        result = invoke("workspace", "--demo", payload={"action": "controller", "enabled": True, "session": "demo:1"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = invoke("agent", "guide", "--demo")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(str(runtime / "td"), json.loads(result.stdout)["text"])
+        self.assertNotIn(str(source / "td"), json.loads(result.stdout)["text"])
+        result = invoke("awake", "status")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("awake: off", result.stdout)
+
+    def test_folder_permission_failure_is_explained(self):
+        self.call("state")
+        with patch.object(Path, "iterdir", side_effect=PermissionError("Desktop access denied")):
+            state = self.call("cached")["state"]
+        self.assertEqual(state["folders"], [])
+        self.assertIn("Files & Folders", state["folders_error"])
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS awake timer")
+    def test_stale_awake_pid_cannot_stop_an_unrelated_process(self):
+        sentinel = subprocess.Popen(["/bin/sleep", "30"])
+        def cleanup():
+            if sentinel.poll() is None:
+                sentinel.terminate()
+            sentinel.wait(timeout=3)
+        self.addCleanup(cleanup)
+        state = Path(self.temp.name) / "awake.state"
+        state.write_text(json.dumps({"state": "1h", "pid": sentinel.pid, "end_ts": time.time()+3600}))
+        self.bridge.demo = False
+        self.assertEqual(self.work.awake_status()["state"], "off")
+        cli = Path(__file__).resolve().parent.parent / "td"
+        result = subprocess.run([str(cli), "awake", "off"], capture_output=True, text=True,
+                                env=dict(os.environ, TD_CONFIG_DIR=self.temp.name), timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNone(sentinel.poll(), "Turning awake off must leave unrelated processes alone")
+        self.assertFalse(is_awake_process(-1))
+        self.assertFalse(is_awake_process(1))
+        state.write_text("incomplete state {")
+        result = subprocess.run([str(cli), "awake", "off"], capture_output=True, text=True,
+                                env=dict(os.environ, TD_CONFIG_DIR=self.temp.name), timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(state.read_text())["state"], "off")
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS awake timer")
+    def test_awake_recognizes_and_stops_its_actual_timer(self):
+        timer = subprocess.Popen(["/usr/bin/caffeinate", "-d", "-t", "30"])
+        def cleanup():
+            if timer.poll() is None:
+                timer.terminate()
+            timer.wait(timeout=3)
+        self.addCleanup(cleanup)
+        (Path(self.temp.name) / "awake.state").write_text(json.dumps({"state": "1h", "pid": timer.pid, "end_ts": time.time()+3600}))
+        self.bridge.demo = False
+        self.assertEqual(self.work.awake_status()["state"], "1h")
+        cli = Path(__file__).resolve().parent.parent / "td"
+        result = subprocess.run([str(cli), "awake", "off"], capture_output=True, text=True,
+                                env=dict(os.environ, TD_CONFIG_DIR=self.temp.name), timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        timer.wait(timeout=3)
 
     def test_launch_quotes_paths_and_multiline_prompts(self):
         root = Path(self.temp.name)
