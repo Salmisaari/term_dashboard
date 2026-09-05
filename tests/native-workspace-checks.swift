@@ -51,6 +51,22 @@ delegate.didRespond = { action in
         check(!delegate.expanded && delegate.panel.frame.height == 52, "Reopening tucks the previous workspace view away")
         delegate.panel.orderOut(nil)
         delegate.pending = false
+        delegate.composer.string = String(repeating: "A longer thought that wraps naturally. ", count: 20)
+        delegate.composer.setSelectedRange(NSRange(location: (delegate.composer.string as NSString).length, length: 0))
+        delegate.textDidChange(Notification(name: NSText.didChangeNotification))
+        check(delegate.headerHeight > 52 && delegate.headerHeight <= 120, "Wrapped prompts grow within the compact five-line limit")
+        check(delegate.composerScroll.contentView.bounds.minY > 0, "Long drafts keep the current typing position visible")
+        delegate.composer.string = ""; delegate.textDidChange(Notification(name: NSText.didChangeNotification))
+        let previousFolder = delegate.folder
+        delegate.folder = "/example/old-project"; delegate.folderField.stringValue = "different project"
+        delegate.query = "different project"; delegate.composer.string = "A thought for the new project"
+        delegate.submit()
+        check(!delegate.pending && delegate.expanded, "An unfinished project choice cannot launch in the previous folder")
+        check(delegate.composer.string == "A thought for the new project", "Choosing the destination preserves the prompt")
+        delegate.folder = previousFolder; delegate.query = ""; delegate.composer.string = ""
+        delegate.drafts["new:/example/old-project"] = "A newer parked draft"
+        delegate.finishLaunch(draft: "new:/example/old-project", submitted: "The earlier submitted draft")
+        check(delegate.drafts["new:/example/old-project"] == "A newer parked draft", "Late launch receipts preserve a newer parked draft")
         delegate.expand("sessions"); delegate.folderField.stringValue = "edward"
         delegate.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification))
         check(descendants(delegate.body).compactMap { $0 as? SessionRow }.count == 2, "Search keeps duplicate Edward terminals distinct")
@@ -63,6 +79,15 @@ delegate.didRespond = { action in
         check(delegate.composer.string.isEmpty, "Draft does not leak to another terminal")
         delegate.select(delegate.sessions.first { $0.text("id") == "demo:6" }!)
         check(delegate.composer.string == heldDraft, "Interrupted terminal draft is retained")
+        delegate.goBack()
+        check(delegate.selectedID == "demo:6" && delegate.composer.string == heldDraft, "Back from details preserves the terminal and draft")
+        delegate.goBack()
+        check(!delegate.expanded, "Back from the list returns to the minimal bar")
+        delegate.countButton.performClick(nil)
+        check(descendants(delegate.body).compactMap { $0 as? SessionRow }.count == 6, "Session count opens the inventory even with a selected terminal")
+        check(delegate.selectedID == "demo:6" && delegate.composer.string == heldDraft, "Opening inventory keeps the draft destination intact")
+        delegate.goBack(); delegate.goBack()
+        check(!delegate.expanded && !delegate.panel.isVisible, "Escape from the compact bar closes it without expanding")
         delegate.select(delegate.sessions.first { $0.text("id") == "demo:1" }!)
         stage = 1; click("Let this agent navigate")
     case 1:
@@ -85,6 +110,10 @@ delegate.didRespond = { action in
         stage = 5; click("Inspect")
     case 5:
         check(delegate.inspection?.isEmpty == false, "Native inspection shows bounded terminal text")
+        let textView = delegate.detailTextScroll!.documentView as! NSTextView
+        let range = NSRange(location: 0, length: min(5, (textView.string as NSString).length))
+        textView.setSelectedRange(range); delegate.layout()
+        check(delegate.detailTextScroll!.documentView === textView && textView.selectedRange() == range, "Refresh preserves text selected for copying")
         stage = 6; click("Hold focus")
     case 6:
         check(delegate.selected?.flag("pinned") == true, "One chosen focus is persisted")

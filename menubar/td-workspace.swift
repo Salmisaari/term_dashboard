@@ -87,6 +87,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
     var awakeButton: ActionButton!
     var mode = "new"
     var expanded = false
+    var detailsVisible = false
     var selectedID: String?
     var folder = ""
     var provider = "codex"
@@ -98,6 +99,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
     var lastRefresh = Date.distantPast
     var error = ""
     var inspection: String?
+    var detailTextScroll: NSScrollView?
     var selectedProposal: String?
     var drafts: [String: String] = [:]
     var scrollOffset: CGFloat = 0
@@ -117,11 +119,18 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
     var selected: Record? { sessions.first { $0.text("id") == selectedID } }
     var draftKey: String { selectedID ?? "new:" + folder }
     var headerHeight: CGFloat {
-        let lines = max(1, min(5, (composer?.string ?? "").split(separator: "\n", omittingEmptySubsequences: false).count))
+        guard let composer = composer, let manager = composer.layoutManager, let container = composer.textContainer else { return 52 }
+        manager.ensureLayout(for: container)
+        let lineHeight = manager.defaultLineHeight(for: composer.font ?? .systemFont(ofSize: 13))
+        let wrapped = Int(ceil(manager.usedRect(for: container).height / lineHeight))
+        let explicit = composer.string.split(separator: "\n", omittingEmptySubsequences: false).count
+        let lines = max(1, min(5, max(wrapped, explicit)))
         return 52 + CGFloat(lines-1)*17
     }
     var tdPath: String {
         if let explicit = ProcessInfo.processInfo.environment["TD_EXECUTABLE"] { return explicit }
+        if let bundled = Bundle.main.resourceURL?.appendingPathComponent("td").path,
+           FileManager.default.isExecutableFile(atPath: bundled) { return bundled }
         return (NSHomeDirectory() + "/bin/td" as NSString).resolvingSymlinksInPath
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -148,9 +157,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self, self.panel.isKeyWindow else { return event }
             if event.keyCode == 53 {
-                if self.selectedID != nil || self.selectedProposal != nil { self.showList() }
-                else if self.expanded { self.expanded = false; self.layout() }
-                else { self.panel.orderOut(nil) }
+                self.goBack()
                 return nil
             }
             if event.modifierFlags.contains(.command) {
@@ -195,7 +202,9 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         folderField.setAccessibilityLabel("Search projects and terminals"); canvas.addSubview(folderField)
         providerButton = button(provider, 227, 5, 58, on: canvas) { [weak self] in self?.providerMenu() }
         countButton = button("···", 291, 5, 46, on: canvas) { [weak self] in
-            guard let self = self else { return }; self.expanded.toggle(); self.mode = "sessions"; self.query = ""; self.layout()
+            guard let self = self else { return }
+            if self.expanded { self.expanded = false; self.layout() }
+            else { self.expand("sessions") }
         }
         countButton.setAccessibilityLabel("Show terminal sessions"); countButton.toolTip = "All terminals · ⌘L"
         countButton.wantsLayer = true; countButton.layer?.cornerRadius = 5; countButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
@@ -208,6 +217,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         composer.textColor = .labelColor; composer.insertionPointColor = accent; composer.textContainerInset = .zero
         composer.textContainer?.lineFragmentPadding = 0; composer.textContainer?.widthTracksTextView = true
         composer.isVerticallyResizable = true; composer.autoresizingMask = [.width]; composer.delegate = self
+        composer.maxSize = NSSize(width: width-45, height: .greatestFiniteMagnitude)
         composer.setAccessibilityLabel("Prompt draft. Return submits; Shift Return adds a line.")
         composerScroll.documentView = composer; canvas.addSubview(composerScroll)
         body = Canvas(frame: .zero); canvas.addSubview(body)
@@ -229,29 +239,37 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         fetch()
     }
     func expand(_ tab: String) {
-        expanded = true; mode = tab; query = ""; scrollOffset = 0; layout()
+        expanded = true; detailsVisible = false; selectedProposal = nil
+        mode = tab; query = ""; scrollOffset = 0; keyboardIndex = 0; layout()
+    }
+    func goBack() {
+        if !expanded { panel.orderOut(nil); return }
+        if selectedProposal != nil { selectedProposal = nil; mode = "updates" }
+        else if detailsVisible { detailsVisible = false }
+        else { expanded = false }
+        layout()
     }
     func saveDraft() { drafts[draftKey] = composer.string }
     func newSession() {
         saveDraft(); selectedID = nil; selectedProposal = nil; inspection = nil; mode = "new"; query = ""
         composer.string = drafts[draftKey] ?? ""; folderField.stringValue = (folder as NSString).lastPathComponent
-        expanded = true; layout(); folderField.selectText(nil)
+        expanded = true; detailsVisible = false; keyboardIndex = 0; layout(); folderField.selectText(nil)
     }
     func showList() {
         saveDraft(); selectedID = nil; selectedProposal = nil; inspection = nil
         mode = "sessions"; query = ""; folderField.stringValue = ""; composer.string = drafts[draftKey] ?? ""
-        expanded = true; layout()
+        expanded = true; detailsVisible = false; keyboardIndex = 0; layout()
     }
     func select(_ session: Record) {
         saveDraft(); selectedID = session.text("id"); selectedProposal = nil; inspection = nil; query = ""
         folderField.stringValue = session.text("project"); composer.string = drafts[draftKey] ?? ""
-        expanded = true; mode = "sessions"; layout()
+        expanded = true; detailsVisible = true; mode = "sessions"; layout()
     }
     func layout() {
         guard canvas != nil else { return }
         let hh = headerHeight
         composerScroll.frame.size.height = hh-31
-        composerScroll.contentView.scroll(to: .zero)
+        let restoreTextFocus = detailTextScroll?.documentView === panel.firstResponder
         for scroll in body.subviews.compactMap({ $0 as? NSScrollView }) {
             NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: scroll.contentView)
         }
@@ -301,7 +319,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
             }
             var bottom: CGFloat
             if let proposalID = selectedProposal { bottom = proposalDetail(proposalID, at: start) }
-            else if selectedID != nil { bottom = sessionDetail(at: start) }
+            else if selectedID != nil && detailsVisible { bottom = sessionDetail(at: start) }
             else if mode == "updates" { bottom = updates(at: start) }
             else { bottom = list(at: start) }
             bottom = navigatorFooter(at: bottom + 8)
@@ -322,6 +340,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         let y = max(screen.visibleFrame.minY+8, min(anchor.minY-4, screen.visibleFrame.maxY)-height)
         panel.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
         canvas.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        if restoreTextFocus, detailTextScroll?.superview === body { panel.makeFirstResponder(detailTextScroll?.documentView) }
     }
     func scroll(_ document: NSView, y: CGFloat, height: CGFloat) {
         let s = NSScrollView(frame: NSRect(x: 0, y: y, width: width, height: height))
@@ -348,7 +367,9 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
                 b.alignment = .left; b.frame.size.height = 32; b.contentTintColor = .labelColor; dy += 34
                 if index == keyboardIndex && !query.isEmpty { b.wantsLayer = true; b.layer?.cornerRadius = 6; b.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.07).cgColor }
             }
-            if folders.isEmpty { label("No matching folder in Desktop/Code.", 18, 10, width-36, 35, on: document); dy = 60 }
+            if folders.isEmpty {
+                label(state.text("folders_error", "No matching folder in Desktop/Code."), 18, 10, width-36, 45, on: document); dy = 70
+            }
         } else {
             let filtered = sessions.filter { s in searching.isEmpty || ["project", "provider", "cwd", "tty", "name"].contains { s.text($0).lowercased().contains(searching) } }
             for (index, s) in filtered.enumerated() { document.addSubview(SessionRow(s, y: dy, width: width, selected: s.flag("pinned") || (!query.isEmpty && index == keyboardIndex)) { [weak self] in self?.select(s) }); dy += 52 }
@@ -443,6 +464,10 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         return y+349
     }
     func textBox(_ text: String, y: CGFloat, height: CGFloat) {
+        if let scroll = detailTextScroll, let tv = scroll.documentView as? NSTextView, tv.string == text {
+            scroll.frame = NSRect(x: 16, y: y, width: width-32, height: height)
+            body.addSubview(scroll); return
+        }
         let scroll = NSScrollView(frame: NSRect(x: 16, y: y, width: width-32, height: height))
         scroll.hasVerticalScroller = true; scroll.drawsBackground = false; scroll.borderType = .noBorder
         let tv = NSTextView(frame: NSRect(x: 0, y: 0, width: width-32, height: height))
@@ -450,6 +475,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         tv.textColor = .labelColor; tv.backgroundColor = NSColor.white.withAlphaComponent(0.03); tv.string = text
         tv.textContainerInset = NSSize(width: 6, height: 6); tv.textContainer?.widthTracksTextView = true
         tv.isVerticallyResizable = true; tv.autoresizingMask = [.width]; scroll.documentView = tv; body.addSubview(scroll)
+        detailTextScroll = scroll
     }
     func navigatorFooter(at y: CGFloat) -> CGFloat {
         let line = NSView(frame: NSRect(x: 14, y: y, width: width-28, height: 1)); line.wantsLayer = true
@@ -466,7 +492,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
     }
     func controlTextDidChange(_ notification: Notification) {
         saveDraft(); let hadSelection = selectedID != nil
-        selectedID = nil; selectedProposal = nil; inspection = nil
+        selectedID = nil; selectedProposal = nil; inspection = nil; detailsVisible = false
         if hadSelection { composer.string = drafts[draftKey] ?? "" }
         query = folderField.stringValue; expanded = true; scrollOffset = 0; keyboardIndex = 0
         if mode == "updates" { mode = "sessions" }; layout()
@@ -494,7 +520,9 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         }
         return false
     }
-    func textDidChange(_ notification: Notification) { saveDraft(); layout() }
+    func textDidChange(_ notification: Notification) {
+        saveDraft(); layout(); composer.scrollRangeToVisible(composer.selectedRange())
+    }
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         if commandSelector == #selector(NSResponder.insertNewline(_:)) {
             if NSApp.currentEvent?.modifierFlags.contains(.shift) == true { textView.insertNewlineIgnoringFieldEditor(nil); return true }
@@ -509,7 +537,11 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
             if !prompt.isEmpty { copy(prompt, receipt: "Draft copied. Paste it in the terminal when ready.") }
             act("focus", ["session": sid]); return
         }
-        guard !folder.isEmpty else { newSession(); return }
+        guard query.isEmpty, !folder.isEmpty, folderField.stringValue == (folder as NSString).lastPathComponent else {
+            expanded = true
+            if query.isEmpty { mode = "new" }
+            layout(); folderField.selectText(nil); return
+        }
         act("launch", ["folder": folder, "provider": provider, "prompt": prompt])
     }
     func copy(_ text: String, receipt message: String) {
@@ -564,16 +596,20 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
                 if action == "read" && self.selectedID == fields.text("session") { self.inspection = result.text("text") }
                 if action == "guide" { self.copy(result.text("text"), receipt: "Handoff copied. Paste it into the selected agent.") }
                 if action == "launch" && !self.demo {
-                    self.drafts[sourceDraft] = ""
-                    if self.draftKey == sourceDraft && self.composer.string == sentDraft { self.composer.string = "" }
+                    self.finishLaunch(draft: sourceDraft, submitted: sentDraft)
                     if self.expanded { self.mode = "sessions" }
                 }
-                if action == "focus" { self.panel.orderOut(nil) }
+                if action == "focus" && self.draftKey == sourceDraft && self.composer.string == sentDraft { self.panel.orderOut(nil) }
             }
             self.layout()
             self.didRespond?(action)
             if self.snapshotMode { self.captureIfRequested() }
         }
+    }
+    func finishLaunch(draft key: String, submitted: String) {
+        // Only consume the exact submitted revision; a newer draft may already be parked elsewhere.
+        if drafts[key] == submitted { drafts[key] = "" }
+        if draftKey == key && composer.string == submitted { composer.string = "" }
     }
     func run(_ arguments: [String], input: Record? = nil, urgent: Bool = false, completion: @escaping (Record) -> Void) {
         let executable = tdPath
@@ -625,7 +661,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         }
         statusItem.menu = m; statusItem.button?.performClick(nil); statusItem.menu = nil
     }
-    @objc func menuQuick() { newSession(); show(compact: false) }
+    @objc func menuQuick() { newSession(); show() }
     @objc func menuSessions() { showList(); show(compact: false) }
     @objc func menuTile() { tile() }
     @objc func menuAutoTile() { autoTile.toggle() }
