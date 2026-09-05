@@ -10,7 +10,13 @@ while [[ -L "$_self" ]]; do
   [[ "$_self" != /* ]] && _self="$_dir/$_self"
 done
 TD_DIR="$(cd "$(dirname "$_self")" && pwd)"
-CONFIG_DIR="${HOME}/.config/td"
+CONFIG_DIR="${TD_CONFIG_DIR:-${HOME}/.config/td}"
+# The workspace and agent interface share a structured local state store.
+case "${1:-}" in
+  dashboard|sessions|session|agent)
+    exec python3 -B -I "${TD_DIR}/dashboard/cli.py" "$@"
+    ;;
+esac
 PROJECTS_FILE="${CONFIG_DIR}/projects.json"
 SESSIONS_DIR="${CONFIG_DIR}/sessions"
 
@@ -23,6 +29,7 @@ source "${TD_DIR}/lib/discover.sh"
 source "${TD_DIR}/lib/tile.sh"
 source "${TD_DIR}/lib/send.sh"
 source "${TD_DIR}/lib/status.sh"
+source "${TD_DIR}/lib/awake.sh"
 
 # ── Help texts ───────────────────────────────────────────────────────
 
@@ -36,6 +43,10 @@ td — Term Dashboard
 Usage: td [command] [args]
 
 Commands:
+  dashboard    Open the calm terminal workspace (--demo for Edward walkthrough)
+  sessions     Structured live terminal inventory (JSON)
+  session      Focus, read, pin, or acknowledge an exact terminal session
+  agent        Portable navigator contract, reports, and proposed handoffs
   status       Show all iTerm sessions with Claude and project status
   tile         Tile iTerm windows on current Space (browser left, terminals right)
   go           Focus the iTerm window running a specific project
@@ -45,6 +56,7 @@ Commands:
   label        Set iTerm tab titles to project/directory names
   projects     Manage the project registry
   menubar      Launch the ⌘td menu bar app
+  awake        Prevent display sleep (cycles: off → 1h → 4h → 24h)
 
 Run 'td <command> --help' for details on a specific command.
 EOF
@@ -183,6 +195,29 @@ Examples:
 EOF
 }
 
+show_help_awake() {
+  cat <<'EOF'
+td awake — Prevent display sleep
+
+  Runs caffeinate in the background to keep the display awake for a
+  fixed duration. State is shared with the menu bar pill via
+  ~/.config/td/awake.state, so clicking the pill and running this
+  command stay in sync.
+
+Usage:
+  td awake              Cycle: off → 1h → 4h → 24h → off
+  td awake 1h           Stay awake for 1 hour
+  td awake 4h           Stay awake for 4 hours
+  td awake 24h          Stay awake for 24 hours
+  td awake off          Disable immediately
+  td awake status       Show current state + remaining time
+
+Examples:
+  td awake              First run → 1h. Run again → 4h.
+  td awake off          Cancel an active timer.
+EOF
+}
+
 show_help_menubar() {
   cat <<'EOF'
 td menubar — Menu bar app for quick access
@@ -215,6 +250,7 @@ for arg in "$@"; do
       label)    show_help_label ;;
       projects) show_help_projects ;;
       menubar)  show_help_menubar ;;
+      awake)    show_help_awake ;;
       *)        show_help ;;
     esac
     exit 0
@@ -231,6 +267,7 @@ case "$cmd" in
   label)     td_label "$@" ;;
   menubar)   td_menubar "$@" ;;
   projects)  td_projects "$@" ;;
+  awake)     td_awake "$@" ;;
   help|-h|--help) show_help ;;
   *)
     echo "Unknown command: $cmd (try 'td help')"

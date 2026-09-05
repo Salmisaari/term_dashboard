@@ -1,3 +1,5 @@
 menubar/td-menubar
 menubar/TD.app/
 .DS_Store
+__pycache__/
+*.pyc
