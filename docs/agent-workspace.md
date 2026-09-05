@@ -109,3 +109,10 @@ bridge to avoid submitting unsolicited work to your agents.
 The active native source is `menubar/td-workspace.swift`. The older local
 `td-menubar.swift` was cloud-offloaded and could not be read; it is retained intact.
 The new entry point preserves the documented Quick Add/provider/awake/tiling flow.
+
+After a native rebuild, macOS can require renewed Desktop and Automation access.
+Allow TD in the system dialog; the panel's **Allow terminal access…** button requests
+access to the running terminal apps. If access was previously denied it opens
+System Settings → Privacy & Security → Automation. Live controls remain paused
+until that OS permission is granted. The Caps Lock global shortcut also depends
+on the existing macOS input-monitoring permission for TD.

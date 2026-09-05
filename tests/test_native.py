@@ -77,6 +77,11 @@ class NativeTest(unittest.TestCase):
                 dispatch(self.work, request)
         self.assertEqual(self.bridge.calls, [])
 
+    def test_cached_view_does_not_request_os_access(self):
+        self.call("state")
+        with patch.object(self.bridge, "discover", side_effect=AssertionError("Permission is missing")):
+            self.assertEqual(len(self.call("cached")["state"]["sessions"]), 6)
+
     def test_launch_quotes_paths_and_multiline_prompts(self):
         root = Path(self.temp.name)
         project = root / "Edward's $(touch unwanted)"; project.mkdir()

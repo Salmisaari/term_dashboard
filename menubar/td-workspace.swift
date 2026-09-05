@@ -1,5 +1,6 @@
 // Native TD workspace. The menu bar owns the human loop; Python owns terminal identity/state.
 import Cocoa
+import Carbon
 
 typealias Record = [String: Any]
 extension Dictionary where Key == String, Value == Any {
@@ -110,6 +111,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
     var keyboardIndex = 0
     var activeRequest = UUID()
     var didRespond: ((String) -> Void)?
+    var missingAccess: [(String, String)] = []
     let queue = DispatchQueue(label: "td.native.bridge", qos: .userInitiated)
     var sessions: [Record] { state.records("sessions") }
     var selected: Record? { sessions.first { $0.text("id") == selectedID } }
@@ -164,7 +166,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
             if self.panel.isVisible || Date().timeIntervalSince(self.lastRefresh) >= 15 { self.fetch() }
         }
         fetch()
-        if demo || snapshotMode || CommandLine.arguments.contains("--show") { show() }
+        if !snapshotMode && !CommandLine.arguments.contains("--headless") && (demo || CommandLine.arguments.contains("--show")) { show() }
     }
     func caps(_ event: NSEvent) {
         guard event.keyCode == 57 else { return }
@@ -221,7 +223,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         l.lineBreakMode = .byTruncatingTail; (view ?? body).addSubview(l); return l
     }
     func show() {
-        layout(); panel.makeKeyAndOrderFront(nil)
+        query = ""; layout()
         panel.makeFirstResponder(folder.isEmpty && selectedID == nil ? folderField : composer)
         fetch()
     }
@@ -265,7 +267,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
             canvas.addSubview(l, positioned: .below, relativeTo: composerScroll)
         }
         providerButton.title = selected?.text("provider") ?? provider
-        let counts = state.record("counts"); let attention = Int(counts.number("attention"))
+        let counts = state.record("counts"); let attention = Int(counts.number("attention")) + state.records("proposals").filter { $0.text("status") == "pending" }.count
         countButton.title = "\(Int(counts.number("total")))" + (attention > 0 ? " · \(attention)" : "")
         countButton.setAccessibilityLabel("\(Int(counts.number("total"))) terminals, \(attention) updates. Show all sessions.")
         countButton.contentTintColor = attention > 0 ? accent : .secondaryLabelColor
@@ -287,11 +289,17 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
             }
             let refresh = button(pending ? "···" : "↻", 358, 8, 28, on: body) { [weak self] in self?.fetch(force: true) }
             refresh.isEnabled = !pending; refresh.toolTip = "Refresh · ⌘R"
+            var start: CGFloat = 42
+            if !missingAccess.isEmpty {
+                label("Allow TD to see " + missingAccess.map { $0.1 }.joined(separator: " and ") + ".", 18, start, width-36, 20, color: .systemOrange)
+                _ = button("Allow terminal access…", 12, start+22, 188, on: body) { [weak self] in self?.requestTerminalAccess() }
+                start += 56
+            }
             var bottom: CGFloat
-            if let proposalID = selectedProposal { bottom = proposalDetail(proposalID, at: 42) }
-            else if selectedID != nil { bottom = sessionDetail(at: 42) }
-            else if mode == "updates" { bottom = updates(at: 42) }
-            else { bottom = list(at: 42) }
+            if let proposalID = selectedProposal { bottom = proposalDetail(proposalID, at: start) }
+            else if selectedID != nil { bottom = sessionDetail(at: start) }
+            else if mode == "updates" { bottom = updates(at: start) }
+            else { bottom = list(at: start) }
             bottom = navigatorFooter(at: bottom + 8)
             let message: String
             if pending { message = "Checking terminals…" }
@@ -508,7 +516,32 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         receipt = message; receiptDate = Date(); layout()
     }
     func fetch(force: Bool = false) {
-        guard !pending else { return }; act(force ? "refresh" : "state")
+        guard !pending else { return }
+        if !demo {
+            let running = Set(NSWorkspace.shared.runningApplications.compactMap { $0.bundleIdentifier })
+            missingAccess = [("com.googlecode.iterm2", "iTerm2"), ("com.apple.Terminal", "Terminal")].filter {
+                guard running.contains($0.0) else { return false }
+                guard let target = NSAppleEventDescriptor(descriptorType: typeApplicationBundleID, data: Data($0.0.utf8)) else { return true }
+                let status = AEDeterminePermissionToAutomateTarget(target.aeDesc, typeWildCard, typeWildCard, false)
+                return status == -1743 || status == -1744
+            }
+        }
+        if !missingAccess.isEmpty { expanded = true; mode = "sessions" }
+        act(missingAccess.isEmpty ? (force ? "refresh" : "state") : "cached")
+    }
+    func requestTerminalAccess() {
+        let targets = missingAccess
+        DispatchQueue.global(qos: .userInitiated).async {
+            var denied = false
+            for (bundle, _) in targets {
+                guard let target = NSAppleEventDescriptor(descriptorType: typeApplicationBundleID, data: Data(bundle.utf8)) else { continue }
+                if AEDeterminePermissionToAutomateTarget(target.aeDesc, typeWildCard, typeWildCard, true) == -1743 { denied = true }
+            }
+            DispatchQueue.main.async {
+                if denied { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!) }
+                self.fetch(force: true)
+            }
+        }
     }
     func act(_ action: String, _ fields: Record = [:]) {
         let pause = action == "controller" && fields["enabled"] as? Bool == false
@@ -522,6 +555,10 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
             if let problem = response["error"] as? String { self.error = problem; self.expanded = true }
             else {
                 self.state = response.record("state")
+                if !self.missingAccess.isEmpty {
+                    self.state["stale"] = true
+                    self.state["sessions"] = self.sessions.map { session -> Record in var s = session; s["stale"] = true; s["ready_to_send"] = false; return s }
+                }
                 let result = response.record("result")
                 if !result.text("message").isEmpty { self.receipt = result.text("message"); self.receiptDate = Date() }
                 if action == "read" && self.selectedID == fields.text("session") { self.inspection = result.text("text") }
@@ -610,12 +647,17 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         else if scene == "compact" { expanded = false; folderField.stringValue = "Peppe_agent" }
         else if scene == "updates" { mode = "updates"; expanded = true }
         else { mode = "sessions"; expanded = true }
-        layout(); show()
+        layout(); panel.makeKeyAndOrderFront(nil)
         DispatchQueue.main.asyncAfter(deadline: .now()+0.3) {
             guard let bitmap = self.canvas.bitmapImageRepForCachingDisplay(in: self.canvas.bounds) else { exit(2) }
             self.canvas.cacheDisplay(in: self.canvas.bounds, to: bitmap)
             guard let data = bitmap.representation(using: .png, properties: [:]) else { exit(3) }
-            do { try data.write(to: URL(fileURLWithPath: path)); print("Native snapshot: \(path) · \(Int(self.width))×\(Int(self.canvas.frame.height)) · \(self.sessions.count) sessions"); exit(0) }
+            do {
+                try data.write(to: URL(fileURLWithPath: path))
+                print("Native snapshot: \(path) · \(Int(self.width))×\(Int(self.canvas.frame.height)) · \(self.sessions.count) sessions")
+                print("Fresh: \(!self.state.flag("stale")) · warnings: \(self.state["warnings"] ?? []) · error: \(self.error)")
+                exit(self.state.flag("stale") || !self.error.isEmpty ? 5 : 0)
+            }
             catch { print(error); exit(4) }
         }
     }

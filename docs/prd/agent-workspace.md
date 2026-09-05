@@ -26,9 +26,9 @@ Edward proof case: real Edward sessions auto-recognized by project folder; a cle
 Failure UX: retain drafts on error; immediate pending labels; retry discovery; no fabricated status; allow revocation even when discovery fails. Respect reduced motion, keyboard navigation, readable contrast, and narrow screens.
 
 ## Build list
-- [ ] Compact native Quick Add with inline sessions, updates, inspection, and revocable navigator.
-- [ ] Native structured transport; preserve provider picker, multiline drafts, awake, Caps Lock shortcut, and tiling.
-- [ ] Compile, exercise isolated Edward flow in AppKit, inspect rendered native panel, and install the verified app.
+- [x] Compact native Quick Add with inline sessions, updates, inspection, and revocable navigator.
+- [x] Native structured transport; preserve provider picker, multiline drafts, awake, Caps Lock shortcut, and tiling.
+- [x] Compile, exercise isolated Edward flow in AppKit, inspect rendered native panel, and install the verified app. macOS access renewal remains a human OS step.
 - [x] Local state, live bridge, structured CLI and agent contract.
 - [x] Calm dashboard: focus, sessions, navigator, receipts, search, pause/revoke.
 - [x] Demo with isolated state and Edward walkthrough.
@@ -37,7 +37,7 @@ Failure UX: retain drafts on error; immediate pending labels; retry discovery; n
 - [x] Run documented existing checks where source is available; dogfood live discovery and browser actions.
 
 ## Done criteria
-Live sessions render with exact IDs; duplicate Edward sessions remain distinct. Human can focus/read, pin/acknowledge, select/revoke navigator, copy guide, and review proposals. Agent CLI can read inventory, authenticate navigation, publish reports, propose actions; disabled/stale/wrong agents are rejected. No fabricated completion. UI works at desktop and narrow width with empty/error states. Automated checks and browser walkthrough pass; live integration gaps are documented honestly.
+Live sessions render with exact IDs; duplicate Edward sessions remain distinct. Human can focus/read, pin/acknowledge, select/revoke navigator, copy guide, and review proposals. Agent CLI can read inventory, authenticate navigation, publish reports, propose actions; disabled/stale/wrong agents are rejected. No fabricated completion. The primary UI is the 400 × 52 point native bar, expanding in place for search, session details, reports, and proposals. Native keyboard/draft/error flows and the isolated Edward AppKit walkthrough pass; live integration gaps are documented honestly.
 
 ## Verification record
 
@@ -48,3 +48,15 @@ Live sessions render with exact IDs; duplicate Edward sessions remain distinct. 
 - Both local services run: live 7373, isolated demo 7374. No production Edward stores or communications modified.
 - Existing menu app and test-kick source are cloud-offloaded; their regressions could not be run. These files were left intact.
 - The host hangs on rename operations. CLI startup disables Python bytecode writes. Git objects were recovered from the original matching remote commit and feature checkpoints recorded on codex/terminal-workspace; original offloaded index and ignore files are retained. A generated .git/index.workspace is available for index-only verification.
+
+## Native correction and verification
+
+- The screenshot clarified that the menu bar is the home. Added `menubar/td-workspace.swift` and a direct JSON transport; the panel requires no browser or web service.
+- Preserved provider choice, multiline prompts, awake timer, Caps Lock entry, and tiling entry points. Existing-session drafts copy and open the exact terminal; agent proposals retain reviewed delivery.
+- 36 Python contract checks pass. Native AppKit walkthrough passes with actual controls: duplicate Edward search, arrow/Return selection, multiline draft retention, toggle/clipboard handoff, check-in, reviewed delivery, inspection, pin, pause during a pending request, and disconnected-target recovery.
+- Inspected compact, session, detail, and proposal renders. Native visual checks now render offscreen so they do not steal the user's typing focus.
+- Live CLI/native adapter discovery verifies 13 agents, two distinct Edward IDs, and no warnings. The installed app's rebuilt identity needs macOS access renewed: Desktop access and Automation for iTerm2. Native preflight displays an Allow terminal access control instead of repeatedly issuing AppleEvents while consent is missing. OS consent cannot be granted by the agent.
+- Both optional browser services are stopped. The native TD app is installed; its original executable was backed up at `~/.config/td/menubar-before-workspace/TD`.
+- iCloud offloaded additional existing files during the work, including `lib/tile.sh` and its regression script. Earlier tiling run passed all six assertions; a fresh run cannot read those sources now. They remain intact. Menu startup and awake use independent early CLI routes.
+
+- Final installed bundle passes `codesign --verify --strict`; the final live native render has 13 sessions, fresh state, and zero warnings. Browser services remain stopped.

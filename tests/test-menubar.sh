@@ -12,4 +12,4 @@ source=(root/'menubar/td-workspace.swift').read_text().split('let application = 
 Path(sys.argv[2]).write_text(source+(root/'tests/native-workspace-checks.swift').read_text())
 PY
 swiftc "$TD_NATIVE_TEST_DIR/main.swift" -o "$TD_NATIVE_TEST_DIR/TD-checks" -framework Cocoa
-TD_CONFIG_DIR="$TD_NATIVE_TEST_DIR/state" TD_EXECUTABLE="$ROOT/td" "$TD_NATIVE_TEST_DIR/TD-checks" --demo
+TD_CONFIG_DIR="$TD_NATIVE_TEST_DIR/state" TD_EXECUTABLE="$ROOT/td" "$TD_NATIVE_TEST_DIR/TD-checks" --demo --headless

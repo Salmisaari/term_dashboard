@@ -58,7 +58,9 @@ def dispatch(work, request):
     if action in ("approve", "dismiss"):
         bounded(request.get("proposal"), "Proposal ID", 100)
     result = {}
-    if action == "state":
+    if action == "cached":
+        pass
+    elif action == "state":
         work.refresh()
     elif action == "refresh":
         work.refresh(force=True)

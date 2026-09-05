@@ -16,6 +16,23 @@ case "${1:-}" in
   dashboard|workspace|sessions|session|agent)
     exec python3 -B -I "${TD_DIR}/dashboard/cli.py" "$@"
     ;;
+  menubar)
+    shift
+    exec bash "${TD_DIR}/menubar/launch.sh" "$@"
+    ;;
+  awake)
+    # These native controls do not depend on discovery or tiling modules.
+    if [[ "${2:-}" == --help || "${2:-}" == -h ]]; then
+      echo 'Usage: td awake [1h|4h|24h|off|status]'
+      echo 'No argument cycles: off → 1h → 4h → 24h → off'
+      exit 0
+    fi
+    mkdir -p "$CONFIG_DIR"
+    source "${TD_DIR}/lib/awake.sh"
+    shift
+    td_awake "$@"
+    exit
+    ;;
 esac
 PROJECTS_FILE="${CONFIG_DIR}/projects.json"
 SESSIONS_DIR="${CONFIG_DIR}/sessions"

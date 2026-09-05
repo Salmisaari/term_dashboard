@@ -16,7 +16,9 @@ class BridgeError(RuntimeError):
 def run(argv, timeout=12):
     try:
         result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except subprocess.TimeoutExpired as exc:
+        raise BridgeError(f"{Path(argv[0]).name} timed out after {timeout}s. Check the terminal app and macOS Automation permission for TD.") from exc
+    except OSError as exc:
         raise BridgeError(f"{Path(argv[0]).name}: {exc}") from exc
     if result.returncode:
         raise BridgeError(result.stderr.strip()[:500] or f"{argv[0]} failed")
