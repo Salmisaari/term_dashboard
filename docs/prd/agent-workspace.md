@@ -4,7 +4,7 @@
 Give Johannes a calm, local home for open terminals: one next action, an accurate inventory, durable receipts, and a portable contract that lets a chosen agent navigate sessions. Edward is the proof case, including duplicate Edward terminals.
 
 ## Scope and chosen design
-Add a Python-standard-library loopback service and dependency-free browser UI alongside the Bash CLI. Preserve existing commands and the native menu app. Native-only expansion and a TUI were considered; the local web surface gives humans and any CLI agent a shared state model with fewer dependencies. The user requested independent execution, so architectural choices are made here without a confirmation gate.
+The native menu bar is the primary home, as clarified by the user's screenshot. Keep the existing dark two-line Quick Add panel and expand beneath it for sessions, updates, and navigator controls. A native AppKit panel talks directly to the shared Python state/bridge via structured local commands; it does not require a web server or browser. The earlier browser UI remains an optional secondary surface. The user requested independent execution, so architectural choices are made here without a confirmation gate.
 
 Discover iTerm2 and Terminal.app plus observable TTY processes. Control supported terminal sessions by immutable instance identity, never project name. Other terminals are visible with explicit capability limits. Do not claim to supervise processes through logout/reboot; the existing timed awake control is exposed and terminal lifetimes remain with their terminal app.
 
@@ -26,6 +26,9 @@ Edward proof case: real Edward sessions auto-recognized by project folder; a cle
 Failure UX: retain drafts on error; immediate pending labels; retry discovery; no fabricated status; allow revocation even when discovery fails. Respect reduced motion, keyboard navigation, readable contrast, and narrow screens.
 
 ## Build list
+- [ ] Compact native Quick Add with inline sessions, updates, inspection, and revocable navigator.
+- [ ] Native structured transport; preserve provider picker, multiline drafts, awake, Caps Lock shortcut, and tiling.
+- [ ] Compile, exercise isolated Edward flow in AppKit, inspect rendered native panel, and install the verified app.
 - [x] Local state, live bridge, structured CLI and agent contract.
 - [x] Calm dashboard: focus, sessions, navigator, receipts, search, pause/revoke.
 - [x] Demo with isolated state and Edward walkthrough.

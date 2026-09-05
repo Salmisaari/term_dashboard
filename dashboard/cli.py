@@ -18,11 +18,14 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 from dashboard.bridge import MacBridge, DemoBridge, BridgeError, ROOT
 from dashboard.core import Workspace, WorkspaceError
 from dashboard.server import Server
+from dashboard.native import dispatch
 
 
 def parser():
     top = argparse.ArgumentParser(prog="td", description="A local home for your terminals and agents.")
     commands = top.add_subparsers(dest="command", required=True)
+    native = commands.add_parser("workspace", help="Native menu panel transport (JSON on stdin)")
+    native.add_argument("--demo", action="store_true")
     dashboard = commands.add_parser("dashboard", help="Open the terminal workspace")
     dashboard.add_argument("action", nargs="?", choices=["start", "serve", "status", "stop", "install", "uninstall"], default="start")
     dashboard.add_argument("--demo", action="store_true", help="Use the isolated Edward walkthrough")
@@ -158,7 +161,16 @@ def main():
             launch(args, config)
             return
         work = Workspace(config, DemoBridge(config) if args.demo else MacBridge(config))
-        if args.command == "sessions":
+        if args.command == "workspace":
+            payload = sys.stdin.read(20001)
+            if len(payload) > 20000:
+                raise WorkspaceError("Native request is too large.")
+            try:
+                request = json.loads(payload or "{}")
+            except ValueError as exc:
+                raise WorkspaceError("Invalid native request JSON.") from exc
+            result = dispatch(work, request)
+        elif args.command == "sessions":
             result = work.view(refresh=True)
         elif args.command == "session":
             if args.action in ("focus", "read"):

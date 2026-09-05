@@ -13,7 +13,7 @@ TD_DIR="$(cd "$(dirname "$_self")" && pwd)"
 CONFIG_DIR="${TD_CONFIG_DIR:-${HOME}/.config/td}"
 # The workspace and agent interface share a structured local state store.
 case "${1:-}" in
-  dashboard|sessions|session|agent)
+  dashboard|workspace|sessions|session|agent)
     exec python3 -B -I "${TD_DIR}/dashboard/cli.py" "$@"
     ;;
 esac
