@@ -62,3 +62,5 @@ Live sessions render with exact IDs; duplicate Edward sessions remain distinct. 
 - Final installed bundle passes `codesign --verify --strict`; the final live native render has 13 sessions, fresh state, and zero warnings. Browser services remain stopped.
 
 - Single-click regression fixed: restore native window presentation in `show()`, and keep only snapshot rendering offscreen. The new actual status-button click check fails against the previous commit and passes after the fix; the opened panel accepts keyboard input and the Edward workflow remains green.
+
+- Minimal main view is now an invariant: normal opening collapses prior views, background discovery/permission errors cannot expand it, and receipts use the existing session indicator. Explicit session/menu/search actions reveal the workspace. AppKit checks cover all of these transitions while retaining the selected terminal and draft.

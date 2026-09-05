@@ -222,7 +222,8 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         l.font = .systemFont(ofSize: size); l.textColor = color; l.maximumNumberOfLines = Int(h/14)+1
         l.lineBreakMode = .byTruncatingTail; (view ?? body).addSubview(l); return l
     }
-    func show() {
+    func show(compact: Bool = true) {
+        if compact { expanded = false }
         layout(); panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(folder.isEmpty && selectedID == nil ? folderField : composer)
         fetch()
@@ -268,9 +269,12 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         }
         providerButton.title = selected?.text("provider") ?? provider
         let counts = state.record("counts"); let attention = Int(counts.number("attention")) + state.records("proposals").filter { $0.text("status") == "pending" }.count
-        countButton.title = "\(Int(counts.number("total")))" + (attention > 0 ? " · \(attention)" : "")
-        countButton.setAccessibilityLabel("\(Int(counts.number("total"))) terminals, \(attention) updates. Show all sessions.")
-        countButton.contentTintColor = attention > 0 ? accent : .secondaryLabelColor
+        let warning = !error.isEmpty || !missingAccess.isEmpty || state.flag("stale") || !(state["warnings"] as? [String] ?? []).isEmpty
+        let detail = !error.isEmpty ? error : !missingAccess.isEmpty ? "Terminal access needed. Click to connect." : warning ? "Connection needs attention. Click for details." : Date().timeIntervalSince(receiptDate) < 8 ? receipt : "All terminals · ⌘L"
+        countButton.title = "\(Int(counts.number("total")))" + (warning ? " !" : attention > 0 ? " · \(attention)" : "")
+        countButton.toolTip = detail
+        countButton.setAccessibilityLabel("\(Int(counts.number("total"))) terminals, \(attention) updates. " + detail)
+        countButton.contentTintColor = warning ? .systemOrange : attention > 0 || Date().timeIntervalSince(receiptDate) < 8 ? accent : .secondaryLabelColor
         statusItem?.button?.title = attention > 0 ? " \(attention)" : ""
         statusItem?.button?.toolTip = "TD · \(Int(counts.number("total"))) terminals · \(attention) updates"
         let awake = state.record("awake").text("state", "off")
@@ -311,9 +315,6 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
             label(message, 17, bottom+5, width-34, 30, size: 10, color: error.isEmpty ? .secondaryLabelColor : .systemOrange)
             height += bottom + 38
             body.frame.size.height = bottom+38
-        } else if !error.isEmpty || Date().timeIntervalSince(receiptDate) < 8 {
-            label(error.isEmpty ? receipt : error, 16, 1, width-32, 29, size: 10, color: error.isEmpty ? accent : .systemOrange)
-            body.frame.size.height = 32; height += 32
         }
         let screen = statusItem?.button?.window?.screen ?? NSScreen.main!
         let anchor = statusItem?.button?.window?.frame ?? NSRect(x: screen.visibleFrame.maxX-20, y: screen.visibleFrame.maxY, width: 20, height: 0)
@@ -526,7 +527,6 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
                 return status == -1743 || status == -1744
             }
         }
-        if !missingAccess.isEmpty { expanded = true; mode = "sessions" }
         act(missingAccess.isEmpty ? (force ? "refresh" : "state") : "cached")
     }
     func requestTerminalAccess() {
@@ -552,7 +552,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         layout()
         run(["workspace"] + (demo ? ["--demo"] : []), input: request, urgent: pause) { [weak self] response in
             guard let self = self, self.activeRequest == requestID else { return }; self.pending = false; self.lastRefresh = Date()
-            if let problem = response["error"] as? String { self.error = problem; self.expanded = true }
+            if let problem = response["error"] as? String { self.error = problem }
             else {
                 self.state = response.record("state")
                 if !self.missingAccess.isEmpty {
@@ -566,7 +566,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
                 if action == "launch" && !self.demo {
                     self.drafts[sourceDraft] = ""
                     if self.draftKey == sourceDraft && self.composer.string == sentDraft { self.composer.string = "" }
-                    self.expanded = true; self.mode = "sessions"
+                    if self.expanded { self.mode = "sessions" }
                 }
                 if action == "focus" { self.panel.orderOut(nil) }
             }
@@ -625,8 +625,8 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         }
         statusItem.menu = m; statusItem.button?.performClick(nil); statusItem.menu = nil
     }
-    @objc func menuQuick() { newSession(); show() }
-    @objc func menuSessions() { showList(); show() }
+    @objc func menuQuick() { newSession(); show(compact: false) }
+    @objc func menuSessions() { showList(); show(compact: false) }
     @objc func menuTile() { tile() }
     @objc func menuAutoTile() { autoTile.toggle() }
     @objc func menuQuit() { NSApp.terminate(nil) }

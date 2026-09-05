@@ -43,6 +43,12 @@ delegate.didRespond = { action in
         delegate.statusItem.button!.performClick(nil)
         check(delegate.panel.isVisible, "One click on the menu-bar icon opens the panel")
         check(delegate.panel.isKeyWindow, "The opened panel accepts keyboard input")
+        check(delegate.panel.frame.height == 52, "Main view opens as the compact two-line bar")
+        delegate.countButton.performClick(nil)
+        check(delegate.expanded && delegate.panel.frame.height > 52, "Session button explicitly expands the workspace")
+        delegate.statusItem.button!.performClick(nil)
+        delegate.statusItem.button!.performClick(nil)
+        check(!delegate.expanded && delegate.panel.frame.height == 52, "Reopening tucks the previous workspace view away")
         delegate.panel.orderOut(nil)
         delegate.pending = false
         delegate.expand("sessions"); delegate.folderField.stringValue = "edward"
@@ -89,10 +95,23 @@ delegate.didRespond = { action in
     case 7:
         check(delegate.state.record("controller").text("state") == "off", "Pause revokes navigation even while another request is pending")
         delegate.select(delegate.sessions.first { $0.text("id") == "demo:6" }!)
+        delegate.expanded = false
         stage = 8; delegate.act("focus", ["session": "disconnected-id"])
     case 8:
         check(!delegate.error.isEmpty, "Disconnected target has actionable feedback")
         check(delegate.composer.string == heldDraft, "Draft survives a transport action failure")
+        check(!delegate.expanded && delegate.panel.frame.height == delegate.headerHeight, "Action failure leaves the main view compact")
+        check(delegate.countButton.title.contains("!"), "Compact failure has a visible status indicator")
+        delegate.error = ""; delegate.receipt = "Focus held."; delegate.receiptDate = Date(); delegate.layout()
+        check(delegate.panel.frame.height == delegate.headerHeight, "Receipts do not add another row to the main view")
+        delegate.missingAccess = [("com.googlecode.iterm2", "iTerm2")]
+        stage = 9; delegate.fetch()
+    case 9:
+        check(!delegate.expanded && delegate.panel.frame.height == delegate.headerHeight, "Permission checks never expand the main view")
+        check(delegate.countButton.title.contains("!"), "Missing permission remains discoverable from the compact bar")
+        delegate.countButton.performClick(nil)
+        check(descendants(delegate.body).compactMap { $0 as? ActionButton }.contains { $0.title == "Allow terminal access…" }, "Explicit expansion reveals the permission control")
+        delegate.missingAccess = []; delegate.state["stale"] = false
         delegate.error = ""; delegate.expanded = false; delegate.composer.string = ""
         delegate.selectedID = nil; delegate.folderField.stringValue = "Peppe_agent"; delegate.receiptDate = .distantPast
         delegate.layout(); check(delegate.panel.frame.height == 52, "Resting bar stays 400 × 52 points")

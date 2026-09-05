@@ -5,6 +5,11 @@ panel starts at 400 × 52 points, matching the original Quick Add bar. It talks
 directly to the Python workspace; no browser, web server, model API key, or package
 installation is needed. Python 3.9+ and the existing Swift compiler are required.
 
+Normal opening always returns to the compact bar. Sessions, reports, and access
+controls expand only through an explicit action. Background errors use a small
+amber indicator on the session button; click it for details. Receipts do not add
+rows to the main view. Multiline drafts can still grow as you type.
+
 ## The human loop
 
 - **Quick Add:** double-tap Caps Lock or click the TD grid icon. Choose a project under Desktop/Code, choose Claude/Claudex/Codex/Hermes, and enter a prompt. Return launches; Shift–Return adds a line. The existing harness launch flags are retained. Hermes starts interactively before receiving its initial prompt.
