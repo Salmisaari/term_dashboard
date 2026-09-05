@@ -38,6 +38,13 @@ delegate.didRespond = { action in
     case 0:
         delegate.timer?.invalidate()
         check(delegate.sessions.count == 6, "Native inventory loaded without HTTP")
+        delegate.panel.orderOut(nil)
+        delegate.pending = true // Exercise presentation without starting another discovery request.
+        delegate.statusItem.button!.performClick(nil)
+        check(delegate.panel.isVisible, "One click on the menu-bar icon opens the panel")
+        check(delegate.panel.isKeyWindow, "The opened panel accepts keyboard input")
+        delegate.panel.orderOut(nil)
+        delegate.pending = false
         delegate.expand("sessions"); delegate.folderField.stringValue = "edward"
         delegate.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification))
         check(descendants(delegate.body).compactMap { $0 as? SessionRow }.count == 2, "Search keeps duplicate Edward terminals distinct")

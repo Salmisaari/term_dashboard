@@ -223,7 +223,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         l.lineBreakMode = .byTruncatingTail; (view ?? body).addSubview(l); return l
     }
     func show() {
-        query = ""; layout()
+        layout(); panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(folder.isEmpty && selectedID == nil ? folderField : composer)
         fetch()
     }
@@ -647,7 +647,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         else if scene == "compact" { expanded = false; folderField.stringValue = "Peppe_agent" }
         else if scene == "updates" { mode = "updates"; expanded = true }
         else { mode = "sessions"; expanded = true }
-        layout(); panel.makeKeyAndOrderFront(nil)
+        query = ""; layout()
         DispatchQueue.main.asyncAfter(deadline: .now()+0.3) {
             guard let bitmap = self.canvas.bitmapImageRepForCachingDisplay(in: self.canvas.bounds) else { exit(2) }
             self.canvas.cacheDisplay(in: self.canvas.bounds, to: bitmap)

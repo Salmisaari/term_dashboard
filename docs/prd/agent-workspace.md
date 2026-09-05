@@ -60,3 +60,5 @@ Live sessions render with exact IDs; duplicate Edward sessions remain distinct. 
 - iCloud offloaded additional existing files during the work, including `lib/tile.sh` and its regression script. Earlier tiling run passed all six assertions; a fresh run cannot read those sources now. They remain intact. Menu startup and awake use independent early CLI routes.
 
 - Final installed bundle passes `codesign --verify --strict`; the final live native render has 13 sessions, fresh state, and zero warnings. Browser services remain stopped.
+
+- Single-click regression fixed: restore native window presentation in `show()`, and keep only snapshot rendering offscreen. The new actual status-button click check fails against the previous commit and passes after the fix; the opened panel accepts keyboard input and the Edward workflow remains green.
