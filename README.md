@@ -288,3 +288,21 @@ term_dashboard/
 └── tests/
     └── test-kick.sh     # Test suite
 ```
+
+## Terminal workspace and agent navigation
+
+```bash
+td dashboard             # Open the local terminal workspace
+td dashboard --demo      # Try Edward's isolated coordination walkthrough
+td sessions              # JSON inventory for any agent or script
+```
+
+The workspace adds a calm overview, searchable terminal inventory, one pinned focus,
+on-demand terminal inspection, and a selectable agent navigator. Enable navigation,
+copy the handoff into that agent, and its reports and proposed prompts arrive in the
+same workspace. Pause navigation to revoke the handoff. Every delivered prompt gets
+a receipt; task completion needs its own evidence.
+
+Requires Python 3.9+ with no additional runtime dependencies. Existing CLI commands
+and the menu bar app continue to work. See [the workspace guide](docs/agent-workspace.md)
+for agent commands, terminal support, freshness, and optional launch-at-login setup.

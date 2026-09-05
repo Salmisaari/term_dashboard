@@ -212,6 +212,23 @@ class WorkspaceTest(unittest.TestCase):
 
 
 class AdapterTest(unittest.TestCase):
+    def test_native_discovery_normalizes_mac_tty_and_excludes_helpers(self):
+        def command(argv, timeout=12):
+            if argv[0] == 'ps':
+                return ('101 1 s001 S+ Sat Sep 5 22:00:00 2026 codex\n'
+                        '102 101 s001 S Sat Sep 5 22:00:01 2026 /Users/me/.codex/bin/codex-code-mode-host\n')
+            if argv[0] == 'osascript':
+                return json.dumps([{'native_id':'exact-id','tty':'/dev/ttys001','name':'Edward (codex)',
+                                    'window':'42','cwd':'/code/edward_agent'}]) if 'iTerm2' in argv[2] else '[]'
+            raise AssertionError('iTerm CWD should avoid lsof: ' + repr(argv))
+        with tempfile.TemporaryDirectory() as config, patch('dashboard.bridge.run', side_effect=command):
+            sessions, warnings = MacBridge(config).discover()
+        self.assertEqual(warnings, [])
+        self.assertEqual(len(sessions), 1)
+        self.assertEqual(sessions[0]['provider'], 'codex')
+        self.assertEqual(sessions[0]['project'], 'edward_agent')
+        self.assertTrue(sessions[0]['instance'].startswith('101:'))
+
     def test_agent_titles_cannot_impersonate_a_live_process(self):
         self.assertEqual(provider_for(['/bin/zsh'], 'edward (codex)'), 'shell')
         self.assertEqual(provider_for(['/opt/bin/codex']), 'codex')
