@@ -31,11 +31,12 @@ if [[ ! -x "$bin" || "$src" -nt "$bin" ]]; then
     cp /Applications/TD.app/Contents/MacOS/TD "$backup/TD"
     cp /Applications/TD.app/Contents/Info.plist "$backup/Info.plist"
   fi
-  cp "$build_dir/TD" "$bin"
+  /usr/bin/install -m 755 "$build_dir/TD" "$bin"
 fi
 # Assemble and sign before replacing the active application. Never delete the bundle.
 mkdir -p "$app/Contents/MacOS"
-cp "$bin" "$app/Contents/MacOS/TD"
+# A new inode avoids macOS retaining the old executable's cached signature.
+/usr/bin/install -m 755 "$bin" "$app/Contents/MacOS/TD"
 mkdir -p "$app/Contents/Resources/dashboard" "$app/Contents/Resources/lib"
 cp "$ROOT/menubar/runtime.sh" "$app/Contents/Resources/td"
 chmod 755 "$app/Contents/Resources/td"
@@ -60,6 +61,7 @@ xattr -dr com.apple.FinderInfo "$app" 2>/dev/null || true
 xattr -dr com.apple.ResourceFork "$app" 2>/dev/null || true
 codesign --force --sign - --identifier com.td.menubar "$app"
 codesign --verify --strict "$app"
+[[ "$("$app/Contents/MacOS/TD" --version)" == 'TD native workspace 2.0' ]]
 # Verify the packaged companion without touching live terminals or requiring a browser.
 python3 -B -I - "$app/Contents/Resources/td" <<'PY'
 import json, os, subprocess, sys, tempfile
@@ -84,7 +86,7 @@ pkill -f 'TD.app/Contents/MacOS/TD' 2>/dev/null || true
 installed="$app"
 if [[ -w /Applications ]]; then
   mkdir -p /Applications/TD.app/Contents/MacOS
-  cp "$app/Contents/MacOS/TD" /Applications/TD.app/Contents/MacOS/TD
+  /usr/bin/install -m 755 "$app/Contents/MacOS/TD" /Applications/TD.app/Contents/MacOS/TD
   cp "$app/Contents/Info.plist" /Applications/TD.app/Contents/Info.plist
   mkdir -p /Applications/TD.app/Contents/_CodeSignature
   cp "$app/Contents/_CodeSignature/CodeResources" /Applications/TD.app/Contents/_CodeSignature/CodeResources
@@ -97,5 +99,6 @@ fi
 xattr -dr com.apple.FinderInfo "$installed" 2>/dev/null || true
 xattr -dr com.apple.ResourceFork "$installed" 2>/dev/null || true
 codesign --verify --strict "$installed"
+[[ "$("$installed/Contents/MacOS/TD" --version)" == 'TD native workspace 2.0' ]]
 open "$installed" --args --show
 echo 'TD is in your menu bar. Click the session count to expand; double-tap Caps Lock for Quick Add.'
