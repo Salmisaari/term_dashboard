@@ -13,8 +13,6 @@ import urllib.request
 from playwright.sync_api import sync_playwright, expect
 
 ROOT = Path(__file__).resolve().parent.parent
-ARTIFACTS = Path(tempfile.gettempdir()) / 'td-workspace-browser'
-ARTIFACTS.mkdir(exist_ok=True)
 
 with tempfile.TemporaryDirectory(prefix='td-browser-state-') as config:
     with socket.socket() as sock:
@@ -59,11 +57,9 @@ with tempfile.TemporaryDirectory(prefix='td-browser-state-') as config:
             page.locator('.proposal-card').first.get_by_role('button', name='Inspect terminal').click(force=True)
             page.locator('#inspect-button').click(force=True)
             expect(page.locator('#terminal-output')).to_contain_text('no live terminal output')
-            page.screenshot(path=str(ARTIFACTS/'terminal-detail.png'), full_page=True)
             page.get_by_role('button', name='Close terminal details', exact=True).click(force=True)
             page.get_by_role('button', name='Approve & send').first.click(force=True)
             expect(page.locator('#all-events')).to_contain_text('Approved prompt delivered')
-            page.screenshot(path=str(ARTIFACTS/'activity-desktop.png'), full_page=True)
             page.keyboard.press('2')
             page.locator('#session-search').fill('edward')
             expect(page.locator('#all-sessions .session-row')).to_have_count(2)
@@ -76,15 +72,12 @@ with tempfile.TemporaryDirectory(prefix='td-browser-state-') as config:
             expect(page.locator('#navigation-toggle')).to_have_attribute('aria-checked','false')
             # A disabled navigator cannot expose an active handoff.
             expect(page.locator('#handoff-button')).to_be_disabled()
-            page.screenshot(path=str(ARTIFACTS/'overview-desktop.png'), full_page=True)
             page.set_viewport_size({'width':390,'height':844})
-            page.screenshot(path=str(ARTIFACTS/'overview-mobile.png'), full_page=True)
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'Mobile horizontal overflow'
             page.keyboard.press('2')
             page.locator('#session-search').fill('no-such-terminal')
             expect(page.locator('#all-sessions')).to_contain_text('No matching terminals')
             page.locator('#session-search').fill('')
-            page.screenshot(path=str(ARTIFACTS/'sessions-mobile.png'), full_page=True)
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'Session list overflow'
             # HTTP outage keeps last data but disables the navigator control.
             page.route('**/api/state', lambda route: route.abort())
@@ -94,7 +87,7 @@ with tempfile.TemporaryDirectory(prefix='td-browser-state-') as config:
             assert not errors, errors
             print(json.dumps({'result':'PASS','flows':['handoff','Edward check-in','inspection','proposal approval',
                 'delivery receipt','duplicate session search','pin','revoke','responsive layout','empty search','connection recovery'],
-                'screenshots':str(ARTIFACTS),'browser_errors':errors}))
+                'browser_errors':errors}))
             browser.close()
     finally:
         service.terminate()
