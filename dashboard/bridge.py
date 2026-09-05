@@ -39,27 +39,33 @@ ITERM_DISCOVERY = '''
 use framework "Foundation"
 use scripting additions
 if application "iTerm2" is not running then return "[]"
-set sessionResults to current application's NSMutableArray's array()
+-- Fetch metadata in bulk; per-session AppleEvents take seconds with many windows.
+-- Check ordering before joining the property columns. Actions also verify the TTY.
 tell application "iTerm2"
- repeat with w in every window
-  repeat with t in every tab of w
-   repeat with s in every session of t
+ set windowIDs to id of every window
+ set sessionData to {unique ID, tty, name} of every session of every tab of every window
+ if (unique ID of every session of every tab of every window) is not (item 1 of sessionData) then error "Terminal layout changed during discovery; refresh again."
+ if (id of every window) is not windowIDs then error "Terminal layout changed during discovery; refresh again."
+end tell
+set sessionResults to current application's NSMutableArray's array()
+repeat with wi from 1 to count windowIDs
+ set idTabs to item wi of item 1 of sessionData
+ set ttyTabs to item wi of item 2 of sessionData
+ set nameTabs to item wi of item 3 of sessionData
+ repeat with ti from 1 to count idTabs
+  set sessionIDs to item ti of idTabs
+  set sessionTTYs to item ti of ttyTabs
+  set sessionNames to item ti of nameTabs
+  repeat with si from 1 to count sessionIDs
     set entry to current application's NSMutableDictionary's dictionary()
-    entry's setObject:(unique ID of s) forKey:"native_id"
-    entry's setObject:(tty of s) forKey:"tty"
-    entry's setObject:(name of s) forKey:"name"
-    entry's setObject:(id of w as text) forKey:"window"
-    set sessionPath to ""
-    try
-     tell s to set sessionPath to variable named "path"
-    end try
-    if sessionPath is missing value then set sessionPath to ""
-    entry's setObject:sessionPath forKey:"cwd"
+    entry's setObject:(item si of sessionIDs) forKey:"native_id"
+    entry's setObject:(item si of sessionTTYs) forKey:"tty"
+    entry's setObject:(item si of sessionNames) forKey:"name"
+    entry's setObject:((item wi of windowIDs) as text) forKey:"window"
     sessionResults's addObject:entry
-   end repeat
   end repeat
  end repeat
-end tell
+end repeat
 set payload to current application's NSJSONSerialization's dataWithJSONObject:sessionResults options:0 |error|:(missing value)
 return (current application's NSString's alloc()'s initWithData:payload encoding:4) as text
 '''
@@ -92,6 +98,7 @@ on run argv
    repeat with t in every tab of w
     repeat with s in every session of t
      if unique ID of s is targetID then
+      if tty of s is not (item 4 of argv) then error "Session identity changed; refresh before acting."
       if actionName is "read" then return contents of s
       if actionName is "focus" then
        select t
@@ -246,7 +253,7 @@ class MacBridge:
         if not session.get("can_" + action):
             raise BridgeError(f"{action.title()} is unavailable for this session.")
         script = ITERM_ACTION if session["app"] == "iTerm2" else TERMINAL_ACTION
-        result = run(["osascript", "-e", script, session["native_id"], action, text], timeout=10)
+        result = run(["osascript", "-e", script, session["native_id"], action, text, session["tty"]], timeout=10)
         return redact(result) if action == "read" else result.strip()
 
     def awake(self, duration):

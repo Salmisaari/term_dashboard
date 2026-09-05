@@ -212,6 +212,27 @@ class WorkspaceTest(unittest.TestCase):
 
 
 class AdapterTest(unittest.TestCase):
+    def test_bulk_inventory_resolves_process_directories_without_changing_identity(self):
+        def command(argv, timeout=12):
+            if argv[0] == 'ps':
+                return ('101 1 s001 S+ Sat Sep 5 22:00:00 2026 codex\n'
+                        '201 1 s002 S+ Sat Sep 5 22:01:00 2026 codex\n')
+            if argv[0] == 'osascript':
+                return json.dumps([
+                    {'native_id': 'edward-one', 'tty': '/dev/ttys001', 'name': 'Edward', 'window': '42'},
+                    {'native_id': 'edward-two', 'tty': '/dev/ttys002', 'name': 'Edward', 'window': '43'},
+                ]) if 'iTerm2' in argv[2] else '[]'
+            if argv[0] == '/usr/sbin/lsof':
+                self.assertIn('101,201', argv)
+                return 'p101\nn/code/edward_agent\np201\nn/code/edward_agent\n'
+            raise AssertionError(argv)
+        with tempfile.TemporaryDirectory() as config, patch('dashboard.bridge.run', side_effect=command):
+            sessions, warnings = MacBridge(config).discover()
+        self.assertEqual(warnings, [])
+        self.assertEqual([s['project'] for s in sessions], ['edward_agent', 'edward_agent'])
+        self.assertEqual([s['id'] for s in sessions], ['iTerm2:edward-one', 'iTerm2:edward-two'])
+        self.assertNotEqual(sessions[0]['instance'], sessions[1]['instance'])
+
     def test_native_discovery_normalizes_mac_tty_and_excludes_helpers(self):
         def command(argv, timeout=12):
             if argv[0] == 'ps':

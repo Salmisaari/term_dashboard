@@ -691,8 +691,9 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
             do {
                 try data.write(to: URL(fileURLWithPath: path))
                 print("Native snapshot: \(path) · \(Int(self.width))×\(Int(self.canvas.frame.height)) · \(self.sessions.count) sessions")
-                print("Fresh: \(!self.state.flag("stale")) · warnings: \(self.state["warnings"] ?? []) · error: \(self.error)")
-                exit(self.state.flag("stale") || !self.error.isEmpty ? 5 : 0)
+                let incomplete = self.state.flag("stale") || self.sessions.contains { $0.flag("stale") } || !(self.state["warnings"] as? [String] ?? []).isEmpty || !self.error.isEmpty
+                print("Complete inventory: \(!incomplete) · warnings: \(self.state["warnings"] ?? []) · error: \(self.error)")
+                exit(incomplete ? 5 : 0)
             }
             catch { print(error); exit(4) }
         }
