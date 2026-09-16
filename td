@@ -65,7 +65,7 @@ Commands:
   session      Focus, read, pin, or acknowledge an exact terminal session
   agent        Portable navigator contract, reports, and proposed handoffs
   status       Show all iTerm sessions with Claude and project status
-  tile         Tile iTerm windows on current Space (browser left, terminals right)
+  tile         Tile iTerm windows per display (main app half, terminals fit in the rest)
   go           Focus the iTerm window running a specific project
   kick         Send a prompt to a running Claude Code session
   start        Open new iTerm window(s) for project(s)
@@ -101,23 +101,23 @@ show_help_tile() {
 td tile — Tile iTerm windows on current Space
 
   Arranges iTerm windows in a grid. Only touches windows on the active
-  macOS Space (other desktops are untouched). Auto-detects a browser
-  and places it on the left as the main window.
+  macOS Space. Each connected display is packed on its own. If that
+  display already has Chrome, Slack, or a similar main window, terminals
+  fill the leftover half so they all fit.
 
 Usage: td tile [options]
 
 Options:
-  --with <app>        Force a specific app as main (e.g. "Safari")
-  --no-main           Full grid, no main app
-  --main-size <pct>   Main app width percentage (default: 55)
+  --with <app>        Only treat this app as the main window (e.g. "Safari")
+  --no-main           Full grid, ignore browsers and other main apps
+  --main-size <pct>   Width used if a browser is snapped (default: 50)
   --gap <px>          Gap between windows in pixels (default: 4)
-  --all               Tile across ALL Spaces (not just current)
 
 Examples:
-  td tile                      Auto-detect browser, tile this Space
+  td tile                      Auto-detect main window, tile this Space
   td tile --no-main            Full-screen terminal grid
-  td tile --main-size 60       Give browser 60% of screen
-  td tile --with "Safari"      Use Safari as the main app
+  td tile --main-size 60       Snap a covering browser to 60%
+  td tile --with "Safari"      Only treat Safari as the main app
 EOF
 }
 

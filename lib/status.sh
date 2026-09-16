@@ -236,7 +236,6 @@ APPLESCRIPT
   echo "Labeled $count sessions."
 }
 
-
 # Build and launch the native menu bar workspace.
 td_menubar() {
   bash "${TD_DIR}/menubar/launch.sh" "$@"

@@ -3,7 +3,7 @@ const $ = (selector) => document.querySelector(selector);
 const token = $('meta[name="td-token"]').content;
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const displayName = (value) => String(value || 'Terminal').replace(/_agent$/i, '').replace(/[_-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-const providerName = (value) => ({codex:'Codex',claude:'Claude',claudex:'Claudex',hermes:'Hermes',shell:'Shell'}[value] || value);
+const providerName = (value) => ({codex:'Codex',claude:'Claude',claudex:'Claudex',hermes:'Hermes',grok:'Grok',shell:'Shell'}[value] || value);
 const stateName = (s) => s.stale ? 'Last seen' : ({running: s.report_by==='system' ? 'Prompt delivered' : s.report_at ? 'Working' : 'Running · unreported',waiting:'Ready for input',blocked:'Needs you',done:'Reported done',shell:'Shell open'}[s.status] || 'Unknown');
 const age = (seconds) => !seconds ? 'not yet' : seconds < 60 ? 'just now' : seconds < 3600 ? `${Math.floor(seconds / 60)}m ago` : seconds < 86400 ? `${Math.floor(seconds / 3600)}h ago` : `${Math.floor(seconds / 86400)}d ago`;
 const ago = (timestamp) => age(Math.max(1, Date.now()/1000 - timestamp));

@@ -22,6 +22,11 @@ final class ActionButton: NSButton {
     required init?(coder: NSCoder) { fatalError() }
     @objc func fire() { invoke?() }
 }
+func sessionTitle(_ session: Record) -> String {
+    let window = session.text("window_name").trimmingCharacters(in: .whitespacesAndNewlines)
+    if !window.isEmpty { return window }
+    return session.text("project")
+}
 final class SessionRow: NSButton {
     override var isFlipped: Bool { true }
     let session: Record
@@ -32,7 +37,8 @@ final class SessionRow: NSButton {
         invoke = action; target = self; self.action = #selector(fire); title = ""; isBordered = false
         wantsLayer = true; layer?.cornerRadius = 8
         if selected { layer?.backgroundColor = NSColor.white.withAlphaComponent(0.07).cgColor }
-        setAccessibilityLabel("\(session.text("project")), \(session.text("provider")), \(session.text("tty")), \(statusName(session))")
+        let title = sessionTitle(session)
+        setAccessibilityLabel("\(title), \(session.text("provider")), \(session.text("tty")), \(statusName(session))")
         toolTip = session.text("cwd") + "\n" + session.text("id")
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -41,11 +47,14 @@ final class SessionRow: NSButton {
         super.draw(dirtyRect)
         let dot = NSBezierPath(ovalIn: NSRect(x: 10, y: 16, width: 6, height: 6))
         statusColor(session).setFill(); dot.fill()
-        let name = session.text("project") + (session.flag("pinned") ? "  · held" : "")
+        let title = sessionTitle(session)
+        let name = title + (session.flag("pinned") ? "  · held" : "")
         drawText(name, rect: NSRect(x: 26, y: 9, width: bounds.width - 134, height: 20), size: 12, color: .labelColor, weight: .medium)
         drawText(session.text("provider"), rect: NSRect(x: bounds.width-105, y: 11, width: 83, height: 18), size: 10, color: .secondaryLabelColor, alignment: .right)
         let tty = session.text("tty").replacingOccurrences(of: "/dev/", with: "")
-        let subtitle = tty + " · " + (session.flag("needs_attention") ? session.text("summary") : statusName(session))
+        let project = session.text("project")
+        let status = session.flag("needs_attention") ? session.text("summary") : statusName(session)
+        let subtitle = (title != project && !project.isEmpty ? project + " · " : "") + tty + " · " + status
         drawText(subtitle, rect: NSRect(x: 26, y: 29, width: bounds.width-49, height: 17), size: 10, color: .secondaryLabelColor)
         drawText("›", rect: NSRect(x: bounds.width-19, y: 8, width: 12, height: 20), size: 16, color: .tertiaryLabelColor)
     }
@@ -83,6 +92,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
     var composer: NSTextView!
     var composerScroll: NSScrollView!
     var countButton: ActionButton!
+    var pickerButton: ActionButton!
     var providerButton: ActionButton!
     var awakeButton: ActionButton!
     var mode = "new"
@@ -91,6 +101,8 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
     var selectedID: String?
     var folder = ""
     var provider = "codex"
+    let launchProviders = ["claude", "claudex", "codex", "hermes", "grok"]
+    var swapMode = false
     var query = ""
     var state: Record = [:]
     var pending = false
@@ -194,13 +206,15 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         canvas.layer?.backgroundColor = NSColor(calibratedWhite: 0.14, alpha: 0.99).cgColor
         canvas.layer?.cornerRadius = 10; canvas.layer?.masksToBounds = true
         panel.contentView = canvas
-        _ = button(">", 9, 5, 18, on: canvas) { [weak self] in self?.providerMenu() }
-        folderField = NSTextField(frame: NSRect(x: 26, y: 6, width: 201, height: 20))
+        pickerButton = button(">", 9, 5, 22, on: canvas) { [weak self] in self?.pickerClicked() }
+        pickerButton.toolTip = "click: swap this terminal to another agent"
+        folderField = NSTextField(frame: NSRect(x: 32, y: 6, width: 195, height: 20))
         folderField.font = .monospacedSystemFont(ofSize: 12, weight: .semibold); folderField.isBordered = false
         folderField.drawsBackground = false; folderField.focusRingType = .none; folderField.delegate = self
         folderField.placeholderString = "project or terminal"; folderField.stringValue = (folder as NSString).lastPathComponent
         folderField.setAccessibilityLabel("Search projects and terminals"); canvas.addSubview(folderField)
-        providerButton = button(provider, 227, 5, 58, on: canvas) { [weak self] in self?.providerMenu() }
+        providerButton = button(provider, 227, 5, 58, on: canvas) { [weak self] in self?.cycleProvider() }
+        providerButton.toolTip = "click: next agent · claude → claudex → codex → hermes → grok"
         countButton = button("···", 291, 5, 46, on: canvas) { [weak self] in
             guard let self = self else { return }
             if self.expanded { self.expanded = false; self.layout() }
@@ -233,7 +247,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         l.lineBreakMode = .byTruncatingTail; (view ?? body).addSubview(l); return l
     }
     func show(compact: Bool = true) {
-        if compact { expanded = false }
+        if compact { expanded = false; swapMode = false }
         layout(); panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(folder.isEmpty && selectedID == nil ? folderField : composer)
         fetch()
@@ -243,6 +257,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         mode = tab; query = ""; scrollOffset = 0; keyboardIndex = 0; layout()
     }
     func goBack() {
+        if swapMode { swapMode = false; expanded = false; detailsVisible = false; layout(); return }
         if !expanded { panel.orderOut(nil); return }
         if selectedProposal != nil { selectedProposal = nil; mode = "updates" }
         else if detailsVisible { detailsVisible = false }
@@ -279,13 +294,18 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         // A real placeholder, kept separate from the editable text and accessibility value.
         canvas.subviews.filter { $0.identifier?.rawValue == "placeholder" }.forEach { $0.removeFromSuperview() }
         if composer.string.isEmpty {
-            let hint = selectedID == nil ? "prompt  ↵" : "draft  ↵ copy & open"
+            let hint = swapMode ? "click ⇄  to continue in \(provider)" : (selectedID == nil ? "prompt  ↵" : "draft  ↵ copy & open")
             let l = label(hint, 26, 29, 330, 19, size: 13, color: .tertiaryLabelColor, on: canvas)
             l.identifier = NSUserInterfaceItemIdentifier("placeholder")
             // Put the placeholder behind the editor so clicking always focuses the draft.
             canvas.addSubview(l, positioned: .below, relativeTo: composerScroll)
         }
-        providerButton.title = selected?.text("provider") ?? provider
+        pickerButton.title = swapMode ? "⇄" : ">"
+        pickerButton.contentTintColor = swapMode ? accent : .secondaryLabelColor
+        pickerButton.toolTip = swapMode ? "click: open this agent with the previous conversation" : "click: swap this terminal to another agent"
+        pickerButton.setAccessibilityLabel(swapMode ? "Swap to the selected agent" : "Arm provider swap")
+        providerButton.title = swapMode ? provider : (selected?.text("provider") ?? provider)
+        providerButton.toolTip = swapMode ? "click: choose where to continue" : "click: next agent · claude → claudex → codex → hermes → grok"
         let counts = state.record("counts"); let attention = Int(counts.number("attention")) + state.records("proposals").filter { $0.text("status") == "pending" }.count
         let warning = !error.isEmpty || !missingAccess.isEmpty || state.flag("stale") || !(state["warnings"] as? [String] ?? []).isEmpty
         let detail = !error.isEmpty ? error : !missingAccess.isEmpty ? "Terminal access needed. Click to connect." : warning ? "Connection needs attention. Click for details." : Date().timeIntervalSince(receiptDate) < 8 ? receipt : "All terminals · ⌘L"
@@ -297,7 +317,9 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         statusItem?.button?.toolTip = "TD · \(Int(counts.number("total"))) terminals · \(attention) updates"
         let awake = state.record("awake").text("state", "off")
         awakeButton.title = awake == "off" ? "awake" : awake; awakeButton.contentTintColor = awake == "off" ? .secondaryLabelColor : accent
-        if expanded {
+        if swapMode && swapCandidates().count > 1 {
+            height += layoutSwapPicker()
+        } else if expanded {
             let line = NSView(frame: NSRect(x: 14, y: 0, width: width-28, height: 1)); line.wantsLayer = true
             line.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor; body.addSubview(line)
             let tabs = [("sessions", "Sessions"), ("updates", "Updates"), ("new", "+ New")]
@@ -371,7 +393,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
                 label(state.text("folders_error", "No matching folder in Desktop/Code."), 18, 10, width-36, 45, on: document); dy = 70
             }
         } else {
-            let filtered = sessions.filter { s in searching.isEmpty || ["project", "provider", "cwd", "tty", "name"].contains { s.text($0).lowercased().contains(searching) } }
+            let filtered = sessions.filter { s in searching.isEmpty || ["project", "provider", "cwd", "tty", "name", "window_name"].contains { s.text($0).lowercased().contains(searching) } }
             for (index, s) in filtered.enumerated() { document.addSubview(SessionRow(s, y: dy, width: width, selected: s.flag("pinned") || (!query.isEmpty && index == keyboardIndex)) { [weak self] in self?.select(s) }); dy += 52 }
             if filtered.isEmpty {
                 label(sessions.isEmpty ? "Your next terminal will appear here." : "No matches. Your other terminals are still held.", 18, 12, width-36, 42, on: document); dy = 72
@@ -498,7 +520,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         if mode == "updates" { mode = "sessions" }; layout()
     }
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-        let choices = mode == "new" ? state.records("folders").filter { query.isEmpty || $0.text("name").localizedCaseInsensitiveContains(query) } : sessions.filter { s in query.isEmpty || ["project", "provider", "tty", "cwd", "name"].contains { s.text($0).localizedCaseInsensitiveContains(query) } }
+        let choices = mode == "new" ? state.records("folders").filter { query.isEmpty || $0.text("name").localizedCaseInsensitiveContains(query) } : sessions.filter { s in query.isEmpty || ["project", "provider", "tty", "cwd", "name", "window_name"].contains { s.text($0).localizedCaseInsensitiveContains(query) } }
         if selector == #selector(NSResponder.moveDown(_:)) || selector == #selector(NSResponder.moveUp(_:)) {
             let delta = selector == #selector(NSResponder.moveDown(_:)) ? 1 : -1
             keyboardIndex = max(0, min(choices.count-1, keyboardIndex+delta)); expanded = true
@@ -532,6 +554,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
     }
     func submit() {
         guard !pending else { return }
+        if swapMode { hopProvider(); return }
         let prompt = composer.string.trimmingCharacters(in: .whitespacesAndNewlines)
         if let sid = selectedID {
             if !prompt.isEmpty { copy(prompt, receipt: "Draft copied. Paste it in the terminal when ready.") }
@@ -599,6 +622,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
                     self.finishLaunch(draft: sourceDraft, submitted: sentDraft)
                     if self.expanded { self.mode = "sessions" }
                 }
+                if action == "swap" { self.swapMode = false; self.expanded = false; self.detailsVisible = false }
                 if action == "focus" && self.draftKey == sourceDraft && self.composer.string == sentDraft { self.panel.orderOut(nil) }
             }
             self.layout()
@@ -632,17 +656,91 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
             } catch { DispatchQueue.main.async { completion(["error": "Could not start the workspace: " + error.localizedDescription]) } }
         }
     }
-    func providerMenu() {
-        let menu = NSMenu()
-        for name in ["claude", "claudex", "codex", "hermes"] {
-            let item = NSMenuItem(title: name.capitalized, action: #selector(pickProvider(_:)), keyEquivalent: "")
-            item.target = self; item.representedObject = name; item.state = provider == name ? .on : .off; menu.addItem(item)
-        }
-        menu.popUp(positioning: nil, at: NSPoint(x: providerButton.frame.minX, y: 28), in: canvas)
+    func pickerClicked() {
+        if swapMode { hopProvider(); return }
+        enterSwapMode()
     }
-    @objc func pickProvider(_ item: NSMenuItem) {
-        provider = item.representedObject as? String ?? "codex"; defaults.set(provider, forKey: "workspace.provider")
-        if selectedID != nil { newSession() }; layout()
+    func swapCandidates() -> [Record] {
+        let name = folderField.stringValue
+        if name.isEmpty { return [] }
+        return sessions.filter { session in
+            session.text("provider") != "shell" && (session.text("project") == name || (session.text("cwd") as NSString).lastPathComponent == name)
+        }
+    }
+    func sourceSession() -> Record? {
+        let matches = swapCandidates()
+        if let id = selectedID, let hit = matches.first(where: { $0.text("id") == id }) { return hit }
+        return matches.count == 1 ? matches[0] : matches.first
+    }
+    func pickSwapSource(_ session: Record) {
+        selectedID = session.text("id")
+        if !session.text("cwd").isEmpty { folder = session.text("cwd") }
+        folderField.stringValue = session.text("project")
+        query = ""
+        layout()
+    }
+    func enterSwapMode() {
+        swapMode = true
+        error = ""
+        if let session = selected, session.text("provider") != "shell" {
+            folderField.stringValue = session.text("project")
+            if folder.isEmpty { folder = session.text("cwd") }
+        }
+        let matches = swapCandidates()
+        if matches.isEmpty {
+            error = "No live agent terminal for this project."; layout(); return
+        }
+        if selectedID == nil || !matches.contains(where: { $0.text("id") == selectedID }) {
+            selectedID = (matches.first { $0.text("status") == "blocked" || $0.flag("needs_attention") } ?? matches[0]).text("id")
+        }
+        expanded = matches.count > 1
+        detailsVisible = false
+        query = ""
+        if let session = sourceSession(), folder.isEmpty {
+            folder = session.text("cwd")
+        }
+        layout()
+    }
+    func layoutSwapPicker() -> CGFloat {
+        let matches = swapCandidates()
+        let line = NSView(frame: NSRect(x: 14, y: 0, width: width-28, height: 1)); line.wantsLayer = true
+        line.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor; body.addSubview(line)
+        label("Which terminal to leave?", 18, 10, width-36, 18, size: 11, color: .secondaryLabelColor)
+        let document = Canvas(frame: NSRect(x: 0, y: 0, width: width, height: 0))
+        var dy: CGFloat = 0
+        for session in matches {
+            document.addSubview(SessionRow(session, y: dy, width: width, selected: session.text("id") == selectedID) { [weak self] in self?.pickSwapSource(session) })
+            dy += 52
+        }
+        document.frame.size.height = dy
+        let listHeight = min(208, max(52, dy))
+        scroll(document, y: 32, height: listHeight)
+        label("Then click ⇄. The other windows stay.", 17, 32+listHeight+4, width-34, 22, size: 10)
+        let extra = 32+listHeight+30
+        body.frame.size.height = extra
+        return extra
+    }
+    func hopProvider() {
+        guard let session = sourceSession() else {
+            error = "Select a live terminal or project first."; layout(); return
+        }
+        if session.text("provider") == provider {
+            let idx = launchProviders.firstIndex(of: provider) ?? -1
+            provider = launchProviders[(idx + 1) % launchProviders.count]
+        }
+        let path = session.text("cwd").isEmpty ? folder : session.text("cwd")
+        act("swap", ["session": session.text("id"), "folder": path, "provider": provider])
+    }
+    func cycleProvider() {
+        let shown = swapMode ? provider : (selected?.text("provider") ?? provider)
+        let idx = launchProviders.firstIndex(of: shown) ?? launchProviders.firstIndex(of: provider) ?? -1
+        setProvider(launchProviders[(idx + 1) % launchProviders.count])
+    }
+    func setProvider(_ name: String) {
+        provider = name
+        defaults.set(provider, forKey: "workspace.provider")
+        defaults.set(provider, forKey: "td.selectedLaunchAgent")
+        if swapMode || selectedID == nil { layout() } else { newSession() }
     }
     func awakeMenu() {
         let menu = NSMenu()

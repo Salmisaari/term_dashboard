@@ -144,6 +144,52 @@ delegate.didRespond = { action in
         delegate.error = ""; delegate.expanded = false; delegate.composer.string = ""
         delegate.selectedID = nil; delegate.folderField.stringValue = "Peppe_agent"; delegate.receiptDate = .distantPast
         delegate.layout(); check(delegate.panel.frame.height == 52, "Resting bar stays 400 × 52 points")
+        check(delegate.launchProviders == ["claude", "claudex", "codex", "hermes", "grok"], "Launch cycle includes Grok")
+        delegate.provider = "claude"; delegate.layout()
+        delegate.providerButton.performClick(nil)
+        check(delegate.provider == "claudex" && delegate.providerButton.title == "claudex", "Clicking Claude advances to Claudex")
+        delegate.providerButton.performClick(nil)
+        check(delegate.provider == "codex", "Clicking Claudex advances to Codex")
+        delegate.providerButton.performClick(nil)
+        check(delegate.provider == "hermes", "Clicking Codex advances to Hermes")
+        delegate.providerButton.performClick(nil)
+        check(delegate.provider == "grok" && delegate.providerButton.title == "grok", "Clicking Hermes advances to Grok")
+        delegate.providerButton.performClick(nil)
+        check(delegate.provider == "claude" && delegate.providerButton.title == "claude", "Clicking Grok wraps back to Claude")
+        check(delegate.pickerButton.title == ">", "Picker starts as >")
+        delegate.provider = "grok"
+        delegate.folderField.stringValue = "penny_agent"
+        delegate.pickerButton.performClick(nil)
+        check(delegate.swapMode && delegate.pickerButton.title == "⇄", "Clicking > becomes the swap icon")
+        check(delegate.provider == "grok", "Swap keeps the agent that was already selected")
+        check(delegate.providerButton.title == "grok", "Swap shows the preselected destination")
+        delegate.goBack()
+        check(!delegate.swapMode && delegate.pickerButton.title == ">", "Escape disarms swap without closing the compact bar")
+        check(!delegate.expanded && delegate.panel.frame.height == 52, "Disarming swap leaves the compact bar compact")
+        delegate.selectedID = nil
+        var extra = delegate.sessions.first { $0.text("id") == "demo:3" }!
+        extra["id"] = "demo:9"; extra["provider"] = "codex"; extra["tty"] = "/dev/demo009"
+        extra["status"] = "running"; extra["needs_attention"] = false; extra["instance"] = "demo-process-9"
+        extra["window_name"] = "receipts"
+        var list = delegate.sessions
+        if var original = list.first(where: { $0.text("id") == "demo:3" }) {
+            original["window_name"] = "inbox"
+            if let idx = list.firstIndex(where: { $0.text("id") == "demo:3" }) { list[idx] = original }
+        }
+        list.append(extra); delegate.state["sessions"] = list
+        delegate.folderField.stringValue = "penny_agent"
+        delegate.pickerButton.performClick(nil)
+        check(delegate.swapMode && delegate.expanded, "Several terminals open the swap picker")
+        check(descendants(delegate.body).compactMap { $0 as? SessionRow }.count == 2, "Swap picker lists both terminals")
+        check(delegate.selectedID == "demo:3", "An existing waiting terminal is preselected")
+        let other = descendants(delegate.body).compactMap { $0 as? SessionRow }.first { $0.session.text("id") == "demo:9" }
+        check(other != nil, "The other terminal is in the picker")
+        check(other?.accessibilityLabel()?.contains("receipts") == true, "Swap rows show the window title")
+        other!.performClick(nil)
+        check(delegate.selectedID == "demo:9", "Clicking a row chooses that terminal")
+        check(delegate.provider == "grok", "Choosing a terminal does not change the destination agent")
+        delegate.goBack()
+        check(!delegate.swapMode && !delegate.expanded, "Escape closes the picker")
         screenshot("td-native-compact")
         restoreClipboard(); print("Native AppKit Edward workflow passed."); exit(0)
     default: break

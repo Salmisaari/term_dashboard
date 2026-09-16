@@ -4,14 +4,142 @@ class KeyPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
+class AgentSelectorButton: NSButton {
+    private var trackingAreaRef: NSTrackingArea?
+    private var hovering = false
+    private let normalSymbol = ">"
+    private let hoverSymbol = "\u{2304}"
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        configure()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configure()
+    }
+
+    private func configure() {
+        isBordered = false
+        bezelStyle = .regularSquare
+        focusRingType = .none
+        setButtonType(.momentaryChange)
+        toolTip = "choose terminal agent"
+        updateSymbol(normalSymbol)
+    }
+
+    override func updateTrackingAreas() {
+        if let trackingAreaRef {
+            removeTrackingArea(trackingAreaRef)
+        }
+
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingAreaRef = area
+        super.updateTrackingAreas()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovering = true
+        transition(to: hoverSymbol)
+        super.mouseEntered(with: event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovering = false
+        transition(to: normalSymbol)
+        super.mouseExited(with: event)
+    }
+
+    func refresh() {
+        updateSymbol(hovering ? hoverSymbol : normalSymbol)
+    }
+
+    private func transition(to symbol: String) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.08
+            animator().alphaValue = 0.35
+        } completionHandler: {
+            self.updateSymbol(symbol)
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.10
+                self.animator().alphaValue = 1
+            }
+        }
+    }
+
+    private func updateSymbol(_ symbol: String) {
+        let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        attributedTitle = NSAttributedString(string: symbol, attributes: [
+            .font: font,
+            .foregroundColor: NSColor.secondaryLabelColor,
+            .paragraphStyle: paragraph
+        ])
+    }
+}
+
 enum SessionStatus { case active, waiting }
 struct FolderSession {
     let tty: String
     let status: SessionStatus
 }
 
+enum LaunchAgent: String {
+    case claude
+    case claudex
+    case codex
+    case hermes
+    case grok
+
+    static let all: [LaunchAgent] = [.claude, .claudex, .codex, .hermes, .grok]
+    static let defaultsKey = "td.selectedLaunchAgent"
+
+    static func saved() -> LaunchAgent {
+        guard let raw = UserDefaults.standard.string(forKey: defaultsKey),
+              let agent = LaunchAgent(rawValue: raw) else {
+            return .claude
+        }
+        return agent
+    }
+
+    /// claude and claudex both run the `claude` binary (claudex just points it at
+    /// a local proxy), so session discovery / kick can treat them the same.
+    var isClaudeFamily: Bool { self == .claude || self == .claudex }
+
+    var displayName: String {
+        switch self {
+        case .claude: return "Claude"
+        case .claudex: return "Claudex"
+        case .codex: return "Codex"
+        case .hermes: return "Hermes"
+        case .grok: return "Grok"
+        }
+    }
+
+    // Always launch in no-prompt mode so the agent never stops to ask for permission.
+    var command: String {
+        switch self {
+        case .claude: return "claude --dangerously-skip-permissions"
+        case .claudex: return "claudex --dangerously-skip-permissions"
+        case .codex: return "codex --dangerously-bypass-approvals-and-sandbox"
+        case .hermes: return "hermes --yolo --cli"
+        case .grok: return "grok --always-approve"
+        }
+    }
+}
+
 class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var statusItem: NSStatusItem!
+    var awakePill: NSButton?
+    var awakeTimer: Timer?
     var autoTile = false
     let tdPath: String = {
         // 1. ~/bin/td (installed by install.sh)
@@ -48,15 +176,27 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var panel: KeyPanel?
     var folderField: NSTextField?
     var promptField: NSTextField?
+    var agentButton: NSButton?
+    var agentLabel: NSButton?
+    var quickAddOuter: NSView?
+    var quickAddInner: NSView?
+    var quickAddBackground: NSVisualEffectView?
     var resultsPanel: NSPanel?
     var resultLabels: [NSTextField] = []
     var allFolders: [String] = []
     var filteredFolders: [String] = []
     var selectedIndex: Int = -1
     var selectedFolder: String?
+    var selectedAgent: LaunchAgent = LaunchAgent.saved()
     var folderSessions: [String: FolderSession] = [:]
     let codeDir = NSString(string: "~/Desktop/Code").expandingTildeInPath
     var keyMonitor: Any?
+
+    let quickAddWidth: CGFloat = 400
+    let quickAddBaseHeight: CGFloat = 52
+    let quickAddPromptMinHeight: CGFloat = 20
+    let quickAddPromptX: CGFloat = 12
+    let quickAddPromptY: CGFloat = 6
 
     // Discovery state
     var lastDiscoveryTime: Date?
@@ -115,6 +255,85 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
         validateTdPath()
         checkiTermPermission()
+    }
+
+    // MARK: - Awake pill (inside Quick Add panel)
+
+    @objc func awakePillClicked() {
+        run("awake")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { self.refreshAwakePill() }
+    }
+
+    func refreshAwakePill() {
+        guard let btn = awakePill else { return }
+        let path = NSString(string: "~/.config/td/awake.state").expandingTildeInPath
+
+        var state = "off"
+        var endTs: Double = 0
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            state = (json["state"] as? String) ?? "off"
+            endTs = (json["end_ts"] as? Double) ?? Double(json["end_ts"] as? Int ?? 0)
+        }
+
+        let now = Date().timeIntervalSince1970
+        let remaining = max(0, Int(endTs - now))
+
+        // Same monospaced font as the folder / model label so the top row reads
+        // as one consistent typeface; no underline.
+        let controlFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+        let para = NSMutableParagraphStyle()
+        para.alignment = .right
+        let textColor: NSColor = (state == "off" || remaining <= 0) ? NSColor.secondaryLabelColor : NSColor.systemGreen
+
+        let title: String
+        if state == "off" || remaining <= 0 {
+            title = "awake"
+        } else if remaining >= 3600 {
+            title = String(format: "awake %d:%02d:%02d", remaining/3600, (remaining%3600)/60, remaining%60)
+        } else {
+            title = String(format: "awake %02d:%02d", remaining/60, remaining%60)
+        }
+        btn.attributedTitle = NSAttributedString(string: title, attributes: [
+            .font: controlFont,
+            .foregroundColor: textColor,
+            .paragraphStyle: para
+        ])
+        layoutRightCluster()
+    }
+
+    // Model indicator shows which agent will launch; clicking it opens the menu.
+    func updateAgentLabel() {
+        guard let label = agentLabel else { return }
+        let para = NSMutableParagraphStyle()
+        para.alignment = .right
+        label.attributedTitle = NSAttributedString(string: selectedAgent.rawValue, attributes: [
+            .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: NSColor.secondaryLabelColor,
+            .paragraphStyle: para
+        ])
+        layoutRightCluster()
+    }
+
+    // Right-align the awake pill at the panel edge and place the model label just
+    // left of it, each sized to its text so the pair stays tight in any state.
+    func layoutRightCluster() {
+        guard let inner = quickAddInner else { return }
+        let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+        let rightMargin: CGFloat = 12
+        let gap: CGFloat = 12
+        let y = inner.bounds.height - 24
+
+        var rightEdge = quickAddWidth - rightMargin
+        if let awake = awakePill {
+            let tw = ceil((awake.attributedTitle.string as NSString).size(withAttributes: [.font: font]).width) + 2
+            awake.frame = NSRect(x: rightEdge - tw, y: y, width: tw, height: 18)
+            rightEdge = rightEdge - tw - gap
+        }
+        if let label = agentLabel {
+            let tw = ceil((label.attributedTitle.string as NSString).size(withAttributes: [.font: font]).width) + 2
+            label.frame = NSRect(x: rightEdge - tw, y: y, width: tw, height: 18)
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -187,9 +406,7 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     // MARK: - Click handling
 
     @objc func clicked() {
-        guard let event = NSApp.currentEvent else { return }
-
-        if event.type == .rightMouseUp {
+        if NSApp.currentEvent?.type == .rightMouseUp {
             showMenu()
             return
         }
@@ -341,40 +558,53 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         // Verify claude is actually running on this TTY before sending
         guard verifyClaudeOnTTY(tty) else { return false }
 
-        let safe = prompt
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        let src = """
-        tell application "iTerm2"
-            repeat with w in every window
-                repeat with t in every tab of w
-                    repeat with s in every session of t
-                        if tty of s is "\(tty)" then
-                            tell s
-                                select
-                                write text "\(safe)"
-                            end tell
-                            return "Sent"
-                        end if
+        let script = """
+        on run argv
+            set targetTTY to item 1 of argv
+            set promptText to item 2 of argv
+            tell application "iTerm2"
+                repeat with w in every window
+                    repeat with t in every tab of w
+                        repeat with s in every session of t
+                            if tty of s is targetTTY then
+                                tell s
+                                    select
+                                    write text promptText
+                                end tell
+                                return "Sent"
+                            end if
+                        end repeat
                     end repeat
                 end repeat
-            end repeat
-        end tell
-        return "NotFound"
+            end tell
+            return "NotFound"
+        end run
         """
-        var err: NSDictionary?
-        if let result = NSAppleScript(source: src)?.executeAndReturnError(&err) {
-            if result.stringValue == "Sent" { return true }
+
+        let osascript = Process()
+        osascript.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        osascript.arguments = ["-", tty, prompt]
+        let input = Pipe()
+        let output = Pipe()
+        osascript.standardInput = input
+        osascript.standardOutput = output
+        osascript.standardError = Pipe()
+        do {
+            try osascript.run()
+            input.fileHandleForWriting.write(Data(script.utf8))
+            input.fileHandleForWriting.closeFile()
+            osascript.waitUntilExit()
+            let out = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            if out.contains("Sent") { return true }
+        } catch {
+            fputs("kickSession osascript error: \(error)\n", stderr)
         }
-        if let e = err { fputs("kickSession AppleScript error: \(e)\n", stderr) }
 
         // Fallback: shell-based td kick
         if !folder.isEmpty {
-            let safeF = folder.replacingOccurrences(of: "'", with: "'\\''")
-            let safeP = prompt.replacingOccurrences(of: "'", with: "'\\''")
             let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            proc.arguments = ["-lc", "'\(tdPath)' kick '\(safeF)' '\(safeP)'"]
+            proc.executableURL = URL(fileURLWithPath: "/bin/bash")
+            proc.arguments = [tdPath, "kick", folder, prompt]
             let pipe = Pipe()
             proc.standardOutput = pipe
             proc.standardError = Pipe()
@@ -407,8 +637,8 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         let shiftHeld = NSEvent.modifierFlags.contains(.shift)
         let useRemembered = selectedFolder != nil && !shiftHeld
 
-        let w: CGFloat = 340
-        let h: CGFloat = 52
+        let w = quickAddWidth
+        let h = quickAddBaseHeight
         var origin = NSPoint(x: 200, y: 200)
         if let buttonFrame = statusItem.button?.window?.frame {
             origin = NSPoint(x: buttonFrame.maxX - w, y: buttonFrame.minY - h - 4)
@@ -427,6 +657,7 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         p.hasShadow = false
 
         let outer = NSView(frame: NSRect(x: 0, y: 0, width: w, height: h))
+        outer.autoresizesSubviews = true
         outer.wantsLayer = true
         outer.layer?.shadowColor = NSColor.black.cgColor
         outer.layer?.shadowOpacity = 0.3
@@ -438,11 +669,15 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         )
 
         let inner = NSView(frame: outer.bounds)
+        inner.autoresizingMask = [.width, .height]
+        inner.autoresizesSubviews = true
         inner.wantsLayer = true
         inner.layer?.cornerRadius = 10
         inner.layer?.cornerCurve = .continuous
         inner.layer?.masksToBounds = true
         outer.addSubview(inner)
+        quickAddOuter = outer
+        quickAddInner = inner
 
         let bg = NSVisualEffectView(frame: inner.bounds)
         bg.autoresizingMask = [.width, .height]
@@ -455,18 +690,60 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                              cornerWidth: 10, cornerHeight: 10, transform: nil)
         bg.layer?.mask = bgMask
         inner.addSubview(bg)
+        quickAddBackground = bg
 
-        let prefixLabel = NSTextField(frame: NSRect(x: 12, y: h - 24, width: 16, height: 18))
-        prefixLabel.stringValue = ">"
-        prefixLabel.isEditable = false
-        prefixLabel.isSelectable = false
-        prefixLabel.isBezeled = false
-        prefixLabel.drawsBackground = false
-        prefixLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
-        prefixLabel.textColor = NSColor.secondaryLabelColor
-        inner.addSubview(prefixLabel)
+        let selectorBtn = AgentSelectorButton(frame: NSRect(x: 12, y: h - 24, width: 16, height: 18))
+        selectorBtn.autoresizingMask = [.minYMargin]
+        selectorBtn.target = self
+        selectorBtn.action = #selector(cycleAgent)
+        inner.addSubview(selectorBtn)
+        agentButton = selectorBtn
 
-        let folderTF = NSTextField(frame: NSRect(x: 24, y: h - 24, width: w - 36, height: 18))
+        // Right cluster: model indicator + awake pill, right-aligned in the same
+        // monospaced font as the rest of the row. layoutRightCluster() sizes and
+        // positions both so the awake countdown and model name never overlap or
+        // leave a floating gap. Frames here are placeholders.
+        let clusterFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+
+        let modelBtn = NSButton(frame: NSRect(x: w - 200, y: h - 24, width: 60, height: 18))
+        modelBtn.autoresizingMask = [.minYMargin, .minXMargin]
+        modelBtn.isBordered = false
+        modelBtn.bezelStyle = .regularSquare
+        modelBtn.target = self
+        modelBtn.action = #selector(cycleAgent)
+        modelBtn.focusRingType = .none
+        modelBtn.setButtonType(.momentaryChange)
+        modelBtn.toolTip = "click: cycle claude → claudex → codex → hermes → grok"
+        inner.addSubview(modelBtn)
+        agentLabel = modelBtn
+
+        let pillBtn = NSButton(frame: NSRect(x: w - 110, y: h - 24, width: 100, height: 18))
+        pillBtn.autoresizingMask = [.minYMargin, .minXMargin]
+        pillBtn.isBordered = false
+        pillBtn.bezelStyle = .regularSquare
+        pillBtn.target = self
+        pillBtn.action = #selector(awakePillClicked)
+        pillBtn.focusRingType = .none
+        pillBtn.setButtonType(.momentaryChange)
+        pillBtn.toolTip = "click: cycle off → 1h → 4h → 24h → off"
+        inner.addSubview(pillBtn)
+        awakePill = pillBtn
+
+        updateAgentLabel()
+        refreshAwakePill()
+        awakeTimer?.invalidate()
+        awakeTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.refreshAwakePill()
+        }
+
+        // Folder field ends before the cluster's widest possible state so they
+        // never collide (longest countdown "awake 24:00:00" + longest agent name).
+        let maxAwakeW = ceil(("awake 24:00:00" as NSString).size(withAttributes: [.font: clusterFont]).width)
+        let maxModelW = ceil(("claudex" as NSString).size(withAttributes: [.font: clusterFont]).width)
+        let clusterLeft = w - 12 - maxAwakeW - 12 - maxModelW
+        let folderWidth = max(CGFloat(90), clusterLeft - 12 - 24)
+        let folderTF = NSTextField(frame: NSRect(x: 24, y: h - 24, width: folderWidth, height: 18))
+        folderTF.autoresizingMask = [.minYMargin, .width]
         folderTF.placeholderString = "search folders..."
         folderTF.stringValue = ""
         folderTF.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
@@ -481,17 +758,19 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         inner.addSubview(folderTF)
         folderField = folderTF
 
-        let promptTF = NSTextField(frame: NSRect(x: 12, y: 6, width: w - 24, height: 20))
-        promptTF.placeholderString = "prompt  \u{21A9}"
+        let promptTF = NSTextField(frame: NSRect(x: quickAddPromptX, y: quickAddPromptY, width: w - quickAddPromptX * 2, height: quickAddPromptMinHeight))
+        promptTF.autoresizingMask = [.width, .height]
+        promptTF.placeholderString = promptPlaceholder()
         promptTF.font = NSFont.systemFont(ofSize: 13)
         promptTF.isBezeled = false
         promptTF.drawsBackground = false
         promptTF.backgroundColor = .clear
-        promptTF.maximumNumberOfLines = 1
-        promptTF.usesSingleLineMode = true
+        promptTF.maximumNumberOfLines = 0
+        promptTF.usesSingleLineMode = false
         (promptTF.cell as? NSTextFieldCell)?.drawsBackground = false
-        (promptTF.cell as? NSTextFieldCell)?.isScrollable = true
-        (promptTF.cell as? NSTextFieldCell)?.lineBreakMode = .byClipping
+        (promptTF.cell as? NSTextFieldCell)?.isScrollable = false
+        (promptTF.cell as? NSTextFieldCell)?.wraps = true
+        (promptTF.cell as? NSTextFieldCell)?.lineBreakMode = .byCharWrapping
         promptTF.textColor = NSColor.tertiaryLabelColor
         promptTF.focusRingType = .none
         promptTF.delegate = self
@@ -538,6 +817,7 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 self.folderField?.stringValue = ""
                 self.promptField?.isEnabled = false
                 self.promptField?.textColor = .tertiaryLabelColor
+                self.updatePromptPlaceholder()
                 self.folderField?.becomeFirstResponder()
             }
         }
@@ -552,7 +832,167 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         panel = nil
         folderField = nil
         promptField = nil
+        awakePill = nil
+        agentButton = nil
+        agentLabel = nil
+        quickAddOuter = nil
+        quickAddInner = nil
+        quickAddBackground = nil
+        awakeTimer?.invalidate()
+        awakeTimer = nil
         if let monitor = keyMonitor { NSEvent.removeMonitor(monitor); keyMonitor = nil }
+    }
+
+    func promptPlaceholder(fresh: Bool = false) -> String {
+        return fresh ? "prompt (fresh)  \u{21A9}" : "prompt  \u{21A9}"
+    }
+
+    func updatePromptPlaceholder(fresh: Bool = false) {
+        promptField?.placeholderString = promptPlaceholder(fresh: fresh)
+        resizeQuickAddForPrompt()
+    }
+
+    func updateAgentButton() {
+        (agentButton as? AgentSelectorButton)?.refresh()
+    }
+
+    // Click to advance to the next agent (claude → claudex → codex → hermes → grok → claude),
+    // the same click-to-cycle pattern as the awake pill.
+    @objc func cycleAgent() {
+        let all = LaunchAgent.all
+        let idx = all.firstIndex(of: selectedAgent) ?? 0
+        selectedAgent = all[(idx + 1) % all.count]
+        UserDefaults.standard.set(selectedAgent.rawValue, forKey: LaunchAgent.defaultsKey)
+        updateAgentButton()
+        updateAgentLabel()
+
+        // Keep the caret where the user was typing.
+        let fresh = selectedFolder == nil && (promptField?.isEnabled ?? false)
+        updatePromptPlaceholder(fresh: fresh)
+        if selectedFolder != nil || fresh {
+            promptField?.becomeFirstResponder()
+        } else {
+            folderField?.becomeFirstResponder()
+        }
+    }
+
+    @objc func agentMenuSelected(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let agent = LaunchAgent(rawValue: raw) else { return }
+        selectedAgent = agent
+        UserDefaults.standard.set(agent.rawValue, forKey: LaunchAgent.defaultsKey)
+        updateAgentButton()
+        updateAgentLabel()
+
+        let fresh = selectedFolder == nil && (promptField?.isEnabled ?? false)
+        updatePromptPlaceholder(fresh: fresh)
+        panel?.makeKeyAndOrderFront(nil)
+        if selectedFolder != nil || fresh {
+            promptField?.becomeFirstResponder()
+        } else {
+            folderField?.becomeFirstResponder()
+        }
+    }
+
+    func makeAgentMenu() -> NSMenu {
+        let menu = NSMenu()
+        for agent in LaunchAgent.all {
+            let mi = NSMenuItem(title: agent.displayName, action: #selector(agentMenuSelected(_:)), keyEquivalent: "")
+            mi.target = self
+            mi.representedObject = agent.rawValue
+            mi.state = agent == selectedAgent ? .on : .off
+            menu.addItem(mi)
+        }
+        return menu
+    }
+
+    func currentPromptText() -> String {
+        if let editor = promptField?.currentEditor() {
+            return editor.string
+        }
+        return promptField?.stringValue ?? ""
+    }
+
+    func promptHeightForCurrentText() -> CGFloat {
+        guard let field = promptField else { return quickAddPromptMinHeight }
+
+        let text = currentPromptText()
+        let sizingText: String
+        if text.isEmpty {
+            sizingText = field.placeholderString ?? "prompt"
+        } else if text.hasSuffix("\n") || text.hasSuffix("\r") {
+            sizingText = text + " "
+        } else {
+            sizingText = text
+        }
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byCharWrapping
+        let font = field.font ?? NSFont.systemFont(ofSize: 13)
+        let rect = (sizingText as NSString).boundingRect(
+            with: NSSize(width: field.frame.width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font, .paragraphStyle: paragraph]
+        )
+
+        return max(quickAddPromptMinHeight, ceil(rect.height) + 4)
+    }
+
+    func refreshQuickAddChrome() {
+        guard let outer = quickAddOuter, let inner = quickAddInner else { return }
+        let rect = CGRect(x: 0, y: 0, width: outer.bounds.width, height: outer.bounds.height)
+        outer.layer?.shadowPath = CGPath(
+            roundedRect: rect,
+            cornerWidth: 10, cornerHeight: 10, transform: nil
+        )
+
+        let mask = CAShapeLayer()
+        mask.path = CGPath(
+            roundedRect: rect,
+            cornerWidth: 10, cornerHeight: 10, transform: nil
+        )
+        quickAddBackground?.layer?.mask = mask
+        inner.layer?.masksToBounds = true
+    }
+
+    func resizeQuickAddForPrompt() {
+        guard let panel = panel, let outer = quickAddOuter, let promptField = promptField else { return }
+
+        let promptHeight = promptHeightForCurrentText()
+        let desiredHeight = quickAddBaseHeight + max(0, promptHeight - quickAddPromptMinHeight)
+        let screenHeight = panel.screen?.visibleFrame.height ?? NSScreen.main?.visibleFrame.height ?? desiredHeight
+        let maxHeight = max(quickAddBaseHeight, screenHeight - 24)
+        let newHeight = min(desiredHeight, maxHeight)
+        let promptFrameHeight = quickAddPromptMinHeight + max(0, newHeight - quickAddBaseHeight)
+        let oldFrame = panel.frame
+
+        if abs(oldFrame.height - newHeight) >= 0.5 {
+            panel.setFrame(
+                NSRect(x: oldFrame.minX, y: oldFrame.maxY - newHeight, width: oldFrame.width, height: newHeight),
+                display: true,
+                animate: false
+            )
+        }
+
+        outer.frame = NSRect(x: 0, y: 0, width: oldFrame.width, height: newHeight)
+        promptField.frame = NSRect(
+            x: quickAddPromptX,
+            y: quickAddPromptY,
+            width: oldFrame.width - quickAddPromptX * 2,
+            height: promptFrameHeight
+        )
+        refreshQuickAddChrome()
+    }
+
+    func insertPromptNewline(_ textView: NSTextView) {
+        textView.insertText("\n", replacementRange: textView.selectedRange())
+        promptField?.stringValue = textView.string
+        resizeQuickAddForPrompt()
+    }
+
+    func promptReturnShouldInsertNewline() -> Bool {
+        let flags = NSApp.currentEvent?.modifierFlags.intersection(.deviceIndependentFlagsMask) ?? []
+        return flags.contains(.shift) || flags.contains(.option) || flags.contains(.control)
     }
 
     // MARK: - Sorting
@@ -573,17 +1013,7 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
         if field.tag == 2 {
             hideResults()
-            let text = field.stringValue
-            if text.contains("\n") || text.contains("\r") {
-                let flat = text
-                    .replacingOccurrences(of: "\r\n", with: " ")
-                    .replacingOccurrences(of: "\n", with: " ")
-                    .replacingOccurrences(of: "\r", with: " ")
-                field.stringValue = flat
-                if let editor = field.currentEditor() {
-                    editor.selectedRange = NSRange(location: flat.count, length: 0)
-                }
-            }
+            resizeQuickAddForPrompt()
             return
         }
 
@@ -721,6 +1151,7 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         hideResults()
         promptField?.isEnabled = true
         promptField?.textColor = .white
+        updatePromptPlaceholder()
         panel?.makeKeyAndOrderFront(nil)
         promptField?.becomeFirstResponder()
     }
@@ -760,7 +1191,8 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             return true
         }
 
-        if sel == #selector(NSResponder.insertNewline(_:)) {
+        if sel == #selector(NSResponder.insertNewline(_:)) ||
+            sel == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)) {
             if isFolder {
                 let typed = folderField?.stringValue.trimmingCharacters(in: .whitespaces) ?? ""
                 if typed.isEmpty {
@@ -768,7 +1200,7 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                     hideResults()
                     promptField?.isEnabled = true
                     promptField?.textColor = .white
-                    promptField?.placeholderString = "prompt (fresh session)  \u{21A9}"
+                    updatePromptPlaceholder(fresh: true)
                     promptField?.becomeFirstResponder()
                 } else if selectedIndex >= 0, selectedIndex < filteredFolders.count {
                     selectFolder()
@@ -782,14 +1214,46 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                     hideResults()
                     promptField?.isEnabled = true
                     promptField?.textColor = .white
+                    updatePromptPlaceholder()
                     promptField?.becomeFirstResponder()
                 }
                 return true
             }
-            if isPrompt { submitQuickAdd(withGit: false); return true }
+            if isPrompt {
+                if sel == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)) || promptReturnShouldInsertNewline() {
+                    insertPromptNewline(textView)
+                } else {
+                    submitQuickAdd(withGit: false)
+                }
+                return true
+            }
         }
 
         if sel == #selector(NSResponder.insertTab(_:)) {
+            if isPrompt {
+                insertPromptNewline(textView)
+                return true
+            }
+            if isFolder {
+                let typed = folderField?.stringValue.trimmingCharacters(in: .whitespaces) ?? ""
+                if selectedFolder != nil {
+                    hideResults()
+                    promptField?.becomeFirstResponder()
+                } else if typed.isEmpty {
+                    selectedFolder = nil
+                    hideResults()
+                    promptField?.isEnabled = true
+                    promptField?.textColor = .white
+                    updatePromptPlaceholder(fresh: true)
+                    promptField?.becomeFirstResponder()
+                } else if selectedIndex >= 0, selectedIndex < filteredFolders.count {
+                    selectFolder()
+                }
+                return true
+            }
+        }
+
+        if sel == #selector(NSResponder.insertBacktab(_:)) {
             if isPrompt {
                 panel?.makeKeyAndOrderFront(nil)
                 folderField?.becomeFirstResponder()
@@ -806,7 +1270,7 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                     hideResults()
                     promptField?.isEnabled = true
                     promptField?.textColor = .white
-                    promptField?.placeholderString = "prompt (fresh session)  \u{21A9}"
+                    updatePromptPlaceholder(fresh: true)
                     promptField?.becomeFirstResponder()
                 } else if selectedIndex >= 0, selectedIndex < filteredFolders.count {
                     selectFolder()
@@ -841,20 +1305,41 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     // MARK: - Submit
 
+    func shellSingleQuoted(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    func shellAnsiCQuoted(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\t", with: "\\t")
+        return "$'\(escaped)'"
+    }
+
+    func appleScriptEscaped(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
     func submitQuickAdd(withGit: Bool = false) {
         let folder = selectedFolder
-        let prompt = promptField?.stringValue ?? ""
+        let agent = selectedAgent
+        let prompt = currentPromptText()
         closeQuickAdd()
 
         guard let folder = folder else {
-            startClaude(path: nil, prompt: prompt, withGit: withGit)
+            startAgent(agent, path: nil, prompt: prompt, withGit: withGit)
             flash()
             return
         }
 
         let path = (codeDir as NSString).appendingPathComponent(folder)
 
-        if !prompt.isEmpty {
+        if agent.isClaudeFamily && !prompt.isEmpty {
             let cachedTTY = folderSessions[folder]?.tty
 
             let doKick = { [weak self] in
@@ -871,7 +1356,7 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
                     DispatchQueue.main.async {
                         if kicked { self.flash() }
-                        else { self.startClaude(path: path, prompt: prompt, withGit: withGit); self.flash() }
+                        else { self.startAgent(agent, path: path, prompt: prompt, withGit: withGit); self.flash() }
                     }
                 }
             }
@@ -885,36 +1370,38 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             return
         }
 
-        startClaude(path: path, prompt: prompt, withGit: withGit)
+        startAgent(agent, path: path, prompt: prompt, withGit: withGit)
         flash()
     }
 
-    func startClaude(path: String?, prompt: String, withGit: Bool = false) {
-        let safePrompt = prompt
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-
+    func startAgent(_ agent: LaunchAgent, path: String?, prompt: String, withGit: Bool = false) {
         var cmd: String
         if let path = path {
-            let safePath = path
-                .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "\"", with: "\\\"")
-            cmd = "ulimit -n 65536 ; cd \\\"\(safePath)\\\""
+            cmd = "ulimit -n 65536 ; cd \(shellSingleQuoted(path))"
             if withGit {
-                cmd += " && git log --oneline --graph -20 ; claude --dangerously-skip-permissions"
+                cmd += " && git log --oneline --graph -20 ; \(agent.command)"
             } else {
-                cmd += " && claude --dangerously-skip-permissions"
+                cmd += " && \(agent.command)"
             }
         } else {
-            cmd = "ulimit -n 65536 ; claude --dangerously-skip-permissions"
+            cmd = "ulimit -n 65536 ; \(agent.command)"
         }
-        if !prompt.isEmpty { cmd += " \\\"\(safePrompt)\\\"" }
 
+        let promptAfterLaunch = agent == .hermes && !prompt.isEmpty
+        if !prompt.isEmpty && !promptAfterLaunch { cmd += " \(shellAnsiCQuoted(prompt))" }
+
+        let promptScript = promptAfterLaunch
+            ? """
+
+                delay 3
+                write text "\(appleScriptEscaped(prompt))"
+            """
+            : ""
         let src = """
         tell application "iTerm2"
             set newWindow to (create window with default profile)
             tell current session of current tab of newWindow
-                write text "\(cmd)"
+                write text "\(appleScriptEscaped(cmd))"\(promptScript)
             end tell
             activate
         end tell
@@ -923,7 +1410,7 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         DispatchQueue.global(qos: .userInitiated).async {
             var err: NSDictionary?
             NSAppleScript(source: src)?.executeAndReturnError(&err)
-            if let e = err { fputs("startClaude AppleScript error: \(e)\n", stderr) }
+            if let e = err { fputs("startAgent AppleScript error: \(e)\n", stderr) }
         }
     }
 
@@ -935,6 +1422,9 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
         item(menu, "Quick Add", "n", #selector(openQuickAdd))
         item(menu, "Tile Up",   "t", #selector(tile))
+        let agentItem = NSMenuItem(title: "Agent: \(selectedAgent.displayName)", action: nil, keyEquivalent: "")
+        agentItem.submenu = makeAgentMenu()
+        menu.addItem(agentItem)
         menu.addItem(NSMenuItem.separator())
         item(menu, "Quit",      "q", #selector(quit))
 

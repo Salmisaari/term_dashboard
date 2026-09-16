@@ -43,6 +43,7 @@ if application "iTerm2" is not running then return "[]"
 -- Check ordering before joining the property columns. Actions also verify the TTY.
 tell application "iTerm2"
  set windowIDs to id of every window
+ set windowNames to name of every window
  set sessionData to {unique ID, tty, name} of every session of every tab of every window
  if (unique ID of every session of every tab of every window) is not (item 1 of sessionData) then error "Terminal layout changed during discovery; refresh again."
  if (id of every window) is not windowIDs then error "Terminal layout changed during discovery; refresh again."
@@ -52,6 +53,10 @@ repeat with wi from 1 to count windowIDs
  set idTabs to item wi of item 1 of sessionData
  set ttyTabs to item wi of item 2 of sessionData
  set nameTabs to item wi of item 3 of sessionData
+ set windowTitle to ""
+ try
+  set windowTitle to (item wi of windowNames) as text
+ end try
  repeat with ti from 1 to count idTabs
   set sessionIDs to item ti of idTabs
   set sessionTTYs to item ti of ttyTabs
@@ -62,6 +67,7 @@ repeat with wi from 1 to count windowIDs
     entry's setObject:(item si of sessionTTYs) forKey:"tty"
     entry's setObject:(item si of sessionNames) forKey:"name"
     entry's setObject:((item wi of windowIDs) as text) forKey:"window"
+    entry's setObject:windowTitle forKey:"window_name"
     sessionResults's addObject:entry
   end repeat
  end repeat
@@ -82,6 +88,11 @@ tell application "Terminal"
    entry's setObject:(tty of t) forKey:"tty"
    entry's setObject:(custom title of t) forKey:"name"
    entry's setObject:(id of w as text) forKey:"window"
+   set windowTitle to ""
+   try
+    set windowTitle to (name of w) as text
+   end try
+   entry's setObject:windowTitle forKey:"window_name"
    sessionResults's addObject:entry
   end repeat
  end repeat
@@ -144,7 +155,7 @@ end run
 
 
 def provider_for(commands, title=""):
-    for provider in ("claudex", "claude", "codex", "hermes"):
+    for provider in ("claudex", "claude", "codex", "hermes", "grok"):
         # Titles alone are not proof that an agent process is still alive.
         for command in commands:
             if Path(command).name.lower().lstrip("-") in (provider, provider + ".exe"):
@@ -240,7 +251,7 @@ class MacBridge:
             ident = f'{app}:{row["native_id"]}'
             if app != "iTerm2":
                 ident += ":" + instance
-            title_project = re.sub(r"\s+\((?:codex|claude|claudex|hermes)\)$", "", re.sub(r"^[^\w~/.]+", "", row["name"]))[:80]
+            title_project = re.sub(r"\s+\((?:codex|claude|claudex|hermes|grok)\)$", "", re.sub(r"^[^\w~/.]+", "", row["name"]))[:80]
             sessions.append(dict(row, id=ident, instance=instance, cwd=cwd,
                                  project=project_for(cwd, registry) if cwd else title_project or "Terminal", provider=provider,
                                  status="running" if provider != "shell" else "shell",

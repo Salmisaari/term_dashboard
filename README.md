@@ -23,7 +23,7 @@ td status
 | **Bash 5+** | macOS ships with bash 3; install via `brew install bash` |
 | **jq** | `brew install jq` |
 | **[Homebrew](https://brew.sh)** | Recommended for installing deps |
-| **Claude Code** | Optional — for full session tracking |
+| **Claude / Claudex / Codex / Hermes / Grok** | Optional — install the CLI you want Quick Add to launch |
 | **GitHub CLI (`gh`)** | Optional — for `td standup` PR/CI status |
 
 ### Install dependencies
@@ -112,19 +112,21 @@ Show all open iTerm sessions with Claude status and project name.
 ---
 
 ### `td tile`
-Tile all iTerm windows on the **current Space**. Auto-detects a browser and places it on the left; terminals fill the right in a grid.
+Tile all iTerm windows on the **current Space**. Each connected display is handled independently: windows stay on their current display. If that display already has a browser, Slack, or similar main window, terminals pack into the leftover half so everything fits.
 
 ```bash
-td tile                        # Auto-detect browser, tile this Space
+td tile                        # Auto-detect main window, tile this Space
 td tile --no-main              # Full-screen terminal grid
-td tile --main-size 60         # Give browser 60% of screen
-td tile --with "Safari"        # Force Safari as main app
+td tile --main-size 60         # If a browser is snapped, give it 60% of the display
+td tile --with "Safari"        # Only treat Safari as the main app
 td tile --gap 8                # 8px gaps between windows
 ```
 
 Tiling layout:
-- **1–3 terminals**: Single vertical column on the right
-- **4+ terminals**: 2×N grid on the right
+- **Main window present**: terminals fill the leftover half (usually the right side)
+- **No main window**: terminals use the whole display
+- **Wide leftover**: terminals sit in a row; tall leftover: they stack
+- **Multiple displays**: each monitor is packed on its own
 
 ---
 
@@ -204,7 +206,7 @@ td menubar stop     # Quit
 **Menu bar features:**
 - **Click** → Compact Quick Add bar; click its session count for the workspace
 - **Right-click** → Quick Add, sessions, tiling, auto-tile, quit
-- **Caps Lock double-tap** → Quick Add panel: browse `~/Desktop/Code/`, click `>` or the provider name to choose Claude/Claudex/Codex/Hermes (each launches interactively in no-permission mode), and type multiline prompts that expand vertically
+- **Caps Lock double-tap** → Quick Add panel: browse `~/Desktop/Code/`, click the provider name to cycle Claude → Claudex → Codex → Hermes → Grok. Click `>` to turn it into a swap control, then click `⇄` to open the next provider in the same folder with a continue prompt from the live terminal. If that folder has several terminals, pick the one to leave from the list. The old window stays and keeps its title. Each new agent launches interactively in no-permission mode. Type multiline prompts that expand vertically
 - Session rows show exact terminals and recent agent reports; a running process alone does not imply progress
 
 The first launch compiles the Swift source — takes ~10 seconds. Subsequent launches are instant.

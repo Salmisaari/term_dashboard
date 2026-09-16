@@ -254,6 +254,7 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(provider_for(['/bin/zsh'], 'edward (codex)'), 'shell')
         self.assertEqual(provider_for(['/opt/bin/codex']), 'codex')
         self.assertEqual(provider_for(['/bin/claudex']), 'claudex')
+        self.assertEqual(provider_for(['/Users/me/.grok/bin/grok']), 'grok')
         self.assertEqual(provider_for(['/usr/bin/notcodex']), 'shell')
         self.assertEqual(provider_for(['/Users/me/.codex/bin/codex-code-mode-host']), 'shell')
 

@@ -49,25 +49,24 @@ td_kick() {
     return 1
   fi
 
-  # Escape for AppleScript string
-  local safe_prompt
-  safe_prompt="${prompt//\\/\\\\}"
-  safe_prompt="${safe_prompt//\"/\\\"}"
-
-  osascript <<APPLESCRIPT
-tell application "iTerm2"
-    repeat with w in every window
-        repeat with t in every tab of w
-            repeat with s in every session of t
-                if tty of s is "$tty" then
-                    tell s to write text "$safe_prompt"
-                    return "Sent"
-                end if
+  osascript - "$tty" "$prompt" <<'APPLESCRIPT'
+on run argv
+    set targetTTY to item 1 of argv
+    set promptText to item 2 of argv
+    tell application "iTerm2"
+        repeat with w in every window
+            repeat with t in every tab of w
+                repeat with s in every session of t
+                    if tty of s is targetTTY then
+                        tell s to write text promptText
+                        return "Sent"
+                    end if
+                end repeat
             end repeat
         end repeat
-    end repeat
-end tell
-return "Session not found"
+    end tell
+    return "Session not found"
+end run
 APPLESCRIPT
   echo "Sent prompt to $project"
 }
@@ -95,11 +94,15 @@ td_start() {
 
     # Get the TTY of the new session so we can send /effort max later
     local new_tty
+    local title
+    title="$(basename "$path")"
+
     new_tty="$(osascript <<APPLESCRIPT
 tell application "iTerm2"
     set newWindow to (create window with default profile)
     tell current session of current tab of newWindow
         write text "cd ${path} && clear && claude"
+        set name to "${title}"
         return tty
     end tell
 end tell

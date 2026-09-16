@@ -15,7 +15,11 @@ from unittest.mock import patch
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 from dashboard.bridge import DemoBridge, MacBridge, is_awake_process
 from dashboard.core import Workspace, WorkspaceError
-from dashboard.native import dispatch, launch_command
+from dashboard.native import (
+    apply_iterm_window_title, continue_prompt, dispatch, ensure_grok_compact_mode,
+    fallback_title, launch_command, pick_source_title, source_window_title,
+    window_id_for_session, _pb_bytes, _pb_str,
+)
 
 
 class NativeTest(unittest.TestCase):
@@ -165,12 +169,14 @@ class NativeTest(unittest.TestCase):
         root = Path(self.temp.name)
         project = root / "Edward's $(touch unwanted)"; project.mkdir()
         prompt = "Read `not a command`\nthen explain $HOME and 'quotes'"
-        for provider in ("claude", "claudex", "codex"):
+        for provider in ("claude", "claudex", "codex", "grok"):
             command = launch_command(str(project), provider, prompt, root)
             tokens = shlex.split(command)
             self.assertIn(str(project.resolve()), tokens)
             self.assertEqual(tokens[-1], prompt)
             self.assertIn(provider, tokens)
+        grok = launch_command(str(project), "grok", prompt, root)
+        self.assertIn("--always-approve", grok)
         hermes = launch_command(str(project), "hermes", prompt, root)
         self.assertTrue(hermes.endswith("hermes --yolo --cli"))
         self.assertNotIn("--oneshot", hermes)
@@ -187,6 +193,99 @@ class NativeTest(unittest.TestCase):
             with self.assertRaisesRegex(WorkspaceError, "Check iTerm"):
                 self.call("launch", folder="/any", provider="codex")
             self.assertEqual(run.call_count, 1)
+
+    def test_continue_prompt_mentions_handoff_file_and_stays_compact(self):
+        root = Path(self.temp.name)
+        (root / "NEXT_SESSION.md").write_text("resume here")
+        session = {"provider": "codex", "project": "hiring_agent", "summary": "Careers restore done."}
+        prompt = continue_prompt(session, "secret password=hunter2\nkeep going", "grok", root)
+        self.assertIn("swapped to grok", prompt)
+        self.assertIn("Read NEXT_SESSION.md first.", prompt)
+        self.assertIn("untrusted context", prompt)
+        self.assertIn("Leave the previous codex terminal running.", prompt)
+        self.assertLessEqual(len(prompt), 8000)
+        self.assertNotIn("hunter2", prompt)
+
+    def test_swap_reads_source_and_does_not_send_into_it(self):
+        result = self.call("swap", session="demo:3", provider="grok", folder=self.temp.name)["result"]
+        self.assertIn("grok", result["message"])
+        self.assertIn("untrusted context", result["prompt"])
+        self.assertIn("penny_agent", result["prompt"])
+        self.assertIn(("demo:3", "read", ""), self.bridge.calls)
+        self.assertFalse(any(call[1] == "send" for call in self.bridge.calls))
+        self.assertEqual(result["title"], "penny_agent")
+        with self.assertRaisesRegex(WorkspaceError, "different agent"):
+            self.call("swap", session="demo:3", provider="claude")
+        with self.assertRaisesRegex(WorkspaceError, "Select a live terminal"):
+            self.call("swap", provider="grok")
+
+    def test_swap_transport_launches_destination_once(self):
+        self.bridge.demo = False
+        with patch.object(self.work, "session_action", return_value={"text": "recent work on hiring"}), \
+             patch("dashboard.native.launch_command", return_value="quoted command") as launch, \
+             patch("dashboard.native.source_window_title", return_value="hiring"), \
+             patch("dashboard.native.apply_iterm_window_title") as apply_title, \
+             patch("dashboard.native.run") as run:
+            run.return_value = "NEW-SESSION-ID\n"
+            self.call("swap", session="demo:3", provider="grok", folder="/any")
+            self.assertEqual(launch.call_args.args[1], "grok")
+            self.assertIn("recent work on hiring", launch.call_args.args[2])
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(run.call_args.args[0][-2:], ["quoted command", "hiring"])
+            apply_title.assert_called_once_with("NEW-SESSION-ID", "hiring")
+
+    def test_ensure_grok_compact_mode_is_sticky(self):
+        path = Path(self.temp.name) / "grok.toml"
+        ensure_grok_compact_mode(path)
+        self.assertIn("compact_mode = true", path.read_text())
+        ensure_grok_compact_mode(path)
+        self.assertEqual(path.read_text().count("compact_mode = true"), 1)
+        path.write_text("[ui]\ncompact_mode = false\nyolo = false\n")
+        ensure_grok_compact_mode(path)
+        text = path.read_text()
+        self.assertIn("compact_mode = true", text)
+        self.assertNotIn("compact_mode = false", text)
+        self.assertIn("yolo = false", text)
+
+    def test_fallback_title_keeps_short_window_names(self):
+        self.assertEqual(source_window_title({"window_name": "hiring", "project": "hiring_agent", "name": "long | hiring_agent (codex)"}), "hiring")
+        self.assertEqual(fallback_title({"name": "hiring", "project": "hiring_agent"}), "hiring")
+        self.assertEqual(
+            fallback_title({"name": "Elevate hiring page positioning | hiring_agent (codex)", "project": "hiring_agent"}),
+            "hiring_agent",
+        )
+
+    def test_pick_source_title_prefers_window_title_field(self):
+        self.assertEqual(pick_source_title("paypal", "paypal (python3)", "paypal", "x"), "paypal")
+        self.assertEqual(
+            pick_source_title("", "d2c_invoicing", "◑ Debtist reconciliation VAT and payments", "project"),
+            "d2c_invoicing",
+        )
+        self.assertEqual(
+            pick_source_title("", "Find Previously Worked Smart Catalog - grok", "⠙ status line", "dev_agent"),
+            "dev_agent",
+        )
+
+    def test_window_id_for_session_walks_list_sessions(self):
+        summary = _pb_str(1, "SESSION-GUID")
+        node = _pb_bytes(2, _pb_bytes(1, summary))
+        window = _pb_bytes(1, _pb_bytes(3, node)) + _pb_str(2, "pty-WINDOW")
+        message = _pb_bytes(106, _pb_bytes(1, window))
+        self.assertEqual(window_id_for_session(message, "SESSION-GUID"), "pty-WINDOW")
+        self.assertEqual(window_id_for_session(message, "missing"), "")
+
+    def test_source_window_title_uses_session_name_when_bar_shows_status(self):
+        with patch("dashboard.native.run", return_value="\nd2c_invoicing\n◑ Debtist reconciliation VAT and payments\n"):
+            self.assertEqual(source_window_title({
+                "app": "iTerm2", "native_id": "guid",
+                "window_name": "◑ Debtist reconciliation VAT and payments",
+                "project": "invoice_template", "name": "d2c_invoicing (caffeinate)",
+            }), "d2c_invoicing")
+
+    def test_apply_iterm_window_title_rejects_empty_ids(self):
+        self.assertFalse(apply_iterm_window_title("", "hiring"))
+        self.assertFalse(apply_iterm_window_title("guid", ""))
+        self.assertFalse(apply_iterm_window_title("guid", "hiring\nnext"))
 
 
 if __name__ == "__main__":

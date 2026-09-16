@@ -554,6 +554,10 @@ main {
   background:#e7eddf;
   color:#6c8058
 }
+.avatar.grok {
+  background:#e8ecf3;
+  color:#5d6b86
+}
 .session-copy {
   min-width:0
 }
