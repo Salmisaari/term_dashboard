@@ -101,7 +101,7 @@ td_start() {
 tell application "iTerm2"
     set newWindow to (create window with default profile)
     tell current session of current tab of newWindow
-        write text "cd ${path} && clear && claude"
+        write text "cd ${path} && clear && claude --dangerously-skip-permissions"
         set name to "${title}"
         return tty
     end tell

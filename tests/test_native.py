@@ -94,7 +94,7 @@ class NativeTest(unittest.TestCase):
         runtime = Path(self.temp.name) / "standalone"
         (runtime / "dashboard").mkdir(parents=True)
         (runtime / "lib").mkdir()
-        for name in ("__init__", "bridge", "core", "native", "cli"):
+        for name in ("__init__", "awake", "bridge", "core", "native", "cli"):
             shutil.copyfile(source / "dashboard" / (name + ".py"), runtime / "dashboard" / (name + ".py"))
         shutil.copyfile(source / "menubar/runtime.sh", runtime / "td")
         shutil.copyfile(source / "lib/awake.sh", runtime / "lib/awake.sh")
@@ -188,7 +188,7 @@ class NativeTest(unittest.TestCase):
         self.bridge.demo = False
         with patch("dashboard.native.launch_command", return_value="quoted command"), patch("dashboard.native.run") as run:
             self.call("launch", folder="/any", provider="hermes", prompt="quoted 'prompt'\nnext line")
-            self.assertEqual(run.call_args.args[0][-2:], ["quoted command", "quoted 'prompt'\nnext line"])
+            self.assertEqual(run.call_args.args[0][-3:], ["quoted command", "any", "quoted 'prompt'\nnext line"])
         with patch("dashboard.native.launch_command", return_value="quoted command"), patch("dashboard.native.run", side_effect=TimeoutError("late")) as run:
             with self.assertRaisesRegex(WorkspaceError, "Check iTerm"):
                 self.call("launch", folder="/any", provider="codex")
@@ -233,6 +233,14 @@ class NativeTest(unittest.TestCase):
             self.assertEqual(run.call_count, 1)
             self.assertEqual(run.call_args.args[0][-2:], ["quoted command", "hiring"])
             apply_title.assert_called_once_with("NEW-SESSION-ID", "hiring")
+
+    def test_swap_finds_python_hosted_hermes_by_project(self):
+        self.bridge.sessions[0].update(project="peppev2", cwd=self.temp.name, provider="hermes")
+        result = self.call("swap", folder="/code/peppev2", provider="codex")["result"]
+        self.assertIn("previous hermes session on peppev2", result["prompt"])
+        self.assertIn("swapped to codex", result["prompt"])
+        self.assertIn(("demo:1", "read", ""), self.bridge.calls)
+        self.assertFalse(any(call[1] == "send" for call in self.bridge.calls))
 
     def test_ensure_grok_compact_mode_is_sticky(self):
         path = Path(self.temp.name) / "grok.toml"

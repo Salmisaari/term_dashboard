@@ -258,6 +258,48 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(provider_for(['/usr/bin/notcodex']), 'shell')
         self.assertEqual(provider_for(['/Users/me/.codex/bin/codex-code-mode-host']), 'shell')
 
+    def test_python_console_script_identity_excludes_prompts_and_helpers(self):
+        python = '/Users/me/.hermes/hermes-agent/venv/bin/python3'
+        hermes = '/Users/me/.hermes/hermes-agent/venv/bin/hermes'
+        self.assertEqual(provider_for([python], arguments=f'{python} {hermes} --yolo --cli'), 'hermes')
+        self.assertEqual(provider_for([python], arguments=f"{python} {hermes} --prompt user's task"), 'hermes')
+        for arguments in (f'{python} worker.py {hermes}', f'{python} -c hermes',
+                          f'{python} -m unrelated hermes', f'{python} /tmp/not-hermes',
+                          f'{python} /tmp/hermes-helper', f'{python} "unterminated'):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(provider_for([python], arguments=arguments), 'shell')
+        self.assertEqual(provider_for(['/bin/zsh'], arguments=f'{python} {hermes}'), 'shell')
+
+    def test_python_hermes_discovery_keeps_exact_terminal_and_agent_instance(self):
+        python = '/Users/me/.hermes/hermes-agent/venv/bin/python3'
+        hermes = '/Users/me/.hermes/hermes-agent/venv/bin/hermes'
+        def command(argv, timeout=12):
+            if argv[0] == 'ps' and '-p' not in argv:
+                return ('101 1 s006 S Sat Sep 5 22:00:00 2026 -zsh\n'
+                        f'102 101 s006 S+ Sat Sep 5 22:01:00 2026 {python}\n'
+                        f'103 102 s006 S Sat Sep 5 22:02:00 2026 {python}\n')
+            if argv[0] == 'ps':
+                self.assertEqual(argv, ['ps', '-ww', '-p', '102,103', '-o', 'pid=,args='])
+                return f'102 {python} {hermes} --yolo --cli\n103 {python} helper.py hermes\n'
+            if argv[0] == 'osascript':
+                return json.dumps([{'native_id': 'peppe-session', 'tty': '/dev/ttys006',
+                                    'name': 'me (python3)', 'window': '1691'}]) if 'iTerm2' in argv[2] else '[]'
+            if argv[0] == '/usr/sbin/lsof':
+                self.assertEqual(argv[argv.index('-p')+1], '102')
+                return 'p102\nn/code/peppev2\n'
+            raise AssertionError(argv)
+        with tempfile.TemporaryDirectory() as config, patch('dashboard.bridge.run', side_effect=command):
+            sessions, warnings = MacBridge(config).discover()
+        self.assertEqual(warnings, [])
+        self.assertEqual(len(sessions), 1)
+        session = sessions[0]
+        self.assertEqual(session['id'], 'iTerm2:peppe-session')
+        self.assertEqual(session['instance'], '102:Sat Sep 5 22:01:00 2026')
+        self.assertEqual(session['project'], 'peppev2')
+        self.assertEqual(session['provider'], 'hermes')
+        self.assertTrue(session['can_read'])
+        self.assertTrue(session['can_send'])
+
     def test_longest_project_boundary_wins(self):
         registry = {'parent': {'path': '/code/app'}, 'child': {'path': '/code/app/child'}}
         self.assertEqual(project_for('/code/app/child/src', registry), 'child')

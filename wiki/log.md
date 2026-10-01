@@ -33,3 +33,7 @@ Arming swap on a folder with more than one live agent opens a short list. Click 
 ## [2026-09-16] feature | Grok launches stay in compact mode
 
 TD pins `[ui] compact_mode = true` before starting Grok. `/compact-mode` is a toggle and there is no CLI flag, so config is the always-on switch.
+
+## [2026-10-02] chore | Public-repo privacy pass and closed-lid awake release
+
+Scrubbed a username, first name and employer project name from tests/docs, documented the root awake helper and agent permission-bypass flags in the README, and ignored iCloud duplicate files.

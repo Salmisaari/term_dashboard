@@ -27,10 +27,11 @@ on run argv
  tell application "iTerm2"
   set w to create window with default profile
   set s to current session of w
+  tell s to set name to (item 2 of argv)
   tell s to write text (item 1 of argv)
-  if (count of argv) > 1 then
+  if (count of argv) > 2 then
    delay 3
-   tell s to write text (item 2 of argv)
+   tell s to write text (item 3 of argv)
   end if
   activate
  end tell
@@ -501,7 +502,8 @@ def dispatch(work, request):
         else:
             # Never retry: a transport timeout may occur after iTerm creates the window.
             try:
-                args = ["/usr/bin/osascript", "-e", LAUNCH, command]
+                title = Path(request["folder"]).expanduser().resolve().name
+                args = ["/usr/bin/osascript", "-e", LAUNCH, command, title]
                 if request.get("provider") == "hermes" and request.get("prompt"):
                     args.append(request["prompt"])
                 run(args)

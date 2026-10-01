@@ -22,11 +22,6 @@ case "${1:-}" in
     ;;
   awake)
     # These native controls do not depend on discovery or tiling modules.
-    if [[ "${2:-}" == --help || "${2:-}" == -h ]]; then
-      echo 'Usage: td awake [1h|4h|24h|off|status]'
-      echo 'No argument cycles: off → 1h → 4h → 24h → off'
-      exit 0
-    fi
     mkdir -p "$CONFIG_DIR"
     source "${TD_DIR}/lib/awake.sh"
     shift
@@ -73,7 +68,7 @@ Commands:
   label        Set iTerm tab titles to project/directory names
   projects     Manage the project registry
   menubar      Launch the ⌘td menu bar app
-  awake        Prevent display sleep (cycles: off → 1h → 4h → 24h)
+  awake        Keep working with the lid closed (off → 1h → 4h → 24h)
 
 Run 'td <command> --help' for details on a specific command.
 EOF
@@ -146,7 +141,7 @@ Usage: td kick <project> "<prompt>"
 
 Examples:
   td kick pepe "check if CI is passing and fix any issues"
-  td kick droppe-returns "run the tests"
+  td kick my-api "run the tests"
 EOF
 }
 
@@ -161,7 +156,7 @@ Usage: td start <project> [project ...]
 
 Examples:
   td start pepe
-  td start pepe droppe-returns    Open two windows
+  td start pepe my-api    Open two windows
 EOF
 }
 
@@ -214,12 +209,11 @@ EOF
 
 show_help_awake() {
   cat <<'EOF'
-td awake — Prevent display sleep
+td awake — Keep working with the lid closed
 
-  Runs caffeinate in the background to keep the display awake for a
-  fixed duration. State is shared with the menu bar pill via
-  ~/.config/td/awake.state, so clicking the pill and running this
-  command stay in sync.
+  Uses TD's native helper on power and battery. Stops at 10% battery.
+  Timers continue after quitting TD; display sleep and locking remain available.
+  One-time setup requires macOS administrator authentication.
 
 Usage:
   td awake              Cycle: off → 1h → 4h → 24h → off
@@ -228,6 +222,8 @@ Usage:
   td awake 24h          Stay awake for 24 hours
   td awake off          Disable immediately
   td awake status       Show current state + remaining time
+  td awake setup        Install the native closed-lid helper
+  td awake uninstall    Restore sleep and remove the helper
 
 Examples:
   td awake              First run → 1h. Run again → 4h.

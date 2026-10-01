@@ -4,13 +4,14 @@
 td_tile() {
   local gap=4
   local main_pct=50
+  local resize_main=false
   local no_main=false
   local with_app=""
 
   while [[ $# -gt 0 ]]; do
     case $1 in
       --gap) gap="$2"; shift 2 ;;
-      --main-size) main_pct="$2"; shift 2 ;;
+      --main-size) main_pct="$2"; resize_main=true; shift 2 ;;
       --with) with_app="$2"; shift 2 ;;
       --no-main) no_main=true; shift ;;
       *) shift ;;
@@ -28,6 +29,7 @@ td_tile() {
   fi
 
   local tiled_any=false
+  local tile_status=0
   local record display_id x y width height ids
   local main_row main_app main_x main_y main_w main_h
   local term_x term_y term_w term_h leftover leftover_pct
@@ -45,11 +47,23 @@ td_tile() {
     main_app=""
 
     if [[ "$no_main" == false ]]; then
-      main_row="$(printf '%s\n' "$onscreen_data" | awk -F '\t' -v wanted="$display_id" -v desired="$with_app" '
+      main_row="$(printf '%s\n' "$onscreen_data" | awk -F '\t' -v wanted="$display_id" -v desired="$with_app" \
+        -v dx="$x" -v dy="$y" -v dw="$width" -v dh="$height" '
+        BEGIN {
+          split("Google Chrome|Google Chrome Canary|Chromium|Arc|Safari|Safari Technology Preview|Firefox|Brave Browser|Microsoft Edge|Dia|Orion|Zen Browser|Vivaldi|Opera|Comet", names, "|")
+          for (i in names) browsers[names[i]] = 1
+        }
         $1 == "MAIN" && $3 == wanted && (desired == "" || $4 == desired) {
-          area = ($7 + 0) * ($8 + 0)
-          if (area > best) {
+          left = $5 > dx ? $5 : dx
+          top = $6 > dy ? $6 : dy
+          right = $5 + $7 < dx + dw ? $5 + $7 : dx + dw
+          bottom = $6 + $8 < dy + dh ? $6 + $8 : dy + dh
+          if (right <= left || bottom <= top) next
+          area = (right - left) * (bottom - top)
+          browser = ($4 in browsers) ? 1 : 0
+          if (area > 0 && (row == "" || browser > bestBrowser || (browser == bestBrowser && area > best))) {
             best = area
+            bestBrowser = browser
             row = $0
           }
         }
@@ -58,12 +72,19 @@ td_tile() {
       if [[ -n "$main_row" ]]; then
         IFS=$'\t' read -r _ _ _ main_app main_x main_y main_w main_h <<< "$main_row"
         read -r term_x term_y term_w term_h < <(remaining_rect "$x" "$y" "$width" "$height" "$main_x" "$main_y" "$main_w" "$main_h")
+        if is_scriptable_browser "$main_app"; then
+          # Preserve the browser's current width; terminals belong to its right.
+          term_x=$(( main_x + main_w ))
+          (( term_x < x )) && term_x="$x"
+          (( term_x > x + width )) && term_x=$(( x + width ))
+          term_y="$y"; term_w=$(( x + width - term_x )); term_h="$height"
+        fi
         leftover="$term_w"
         leftover_pct=0
         if (( width > 0 )); then
           leftover_pct=$(( leftover * 100 / width ))
         fi
-        if (( leftover_pct < 30 )) && is_scriptable_browser "$main_app"; then
+        if [[ "$resize_main" == true ]] && (( leftover_pct < 30 )) && is_scriptable_browser "$main_app"; then
           main_w=$(( width * main_pct / 100 ))
           main_x="$x"
           main_y="$y"
@@ -75,13 +96,16 @@ td_tile() {
             term_h="$height"
           fi
         fi
-        if (( term_w < 280 && term_h < 280 )); then
-          term_x="$x"; term_y="$y"; term_w="$width"; term_h="$height"
+        if (( term_w <= gap * 2 || term_h <= gap * 2 )); then
+          echo "No room beside $main_app on display $display_id; make it narrower and tile again."
+          tiled_any=true
+          tile_status=1
+          continue
         fi
       fi
     fi
 
-    tile_layout \
+    if ! tile_layout \
       "$gap" \
       "" \
       "$main_pct" \
@@ -89,13 +113,16 @@ td_tile() {
       "$term_x" \
       "$term_y" \
       "$term_w" \
-      "$term_h"
+      "$term_h"; then
+      tile_status=1
+    fi
     tiled_any=true
   done <<< "$screen_rows"
 
   if [[ "$tiled_any" == false ]]; then
     echo "No iTerm2 windows found"
   fi
+  return "$tile_status"
 }
 
 # Largest leftover strip on a display after subtracting the main window.
@@ -381,8 +408,9 @@ tell application "iTerm2"
         set gridR to ((winCount + gridC - 1) div gridC)
     end if
 
-    set cellW to ((usableW - (gap * (gridC + 1))) / gridC) as integer
-    set cellH to ((usableH - (gap * (gridR + 1))) / gridR) as integer
+    set cellW to ((usableW - (gap * (gridC + 1))) div gridC)
+    set cellH to ((usableH - (gap * (gridR + 1))) div gridR)
+    set failedCount to 0
 
     repeat with i from 1 to winCount
         set c to ((i - 1) mod gridC)
@@ -393,11 +421,11 @@ tell application "iTerm2"
 
         set rightEdge to x + cellW
         if c is (gridC - 1) then
-            set rightEdge to screenX + usableW
+            set rightEdge to screenX + usableW - gap
         end if
 
         if r is (gridR - 1) then
-            set bottomEdge to screenY + usableH
+            set bottomEdge to screenY + usableH - gap
         else
             set bottomEdge to y + cellH
         end if
@@ -405,15 +433,39 @@ tell application "iTerm2"
         set targetBounds to {x, y, rightEdge, bottomEdge}
 
         try
-            set bounds of (item i of windowsToTile) to targetBounds
+            set targetWindow to item i of windowsToTile
+            set fitted to false
+            repeat 4 times
+                set bounds of targetWindow to targetBounds
+                set actualBounds to bounds of targetWindow
+                if (item 1 of actualBounds) is greater than or equal to x and (item 2 of actualBounds) is greater than or equal to y and (item 3 of actualBounds) is less than or equal to rightEdge and (item 4 of actualBounds) is less than or equal to bottomEdge then
+                    set fitted to true
+                    exit repeat
+                end if
+                -- macOS may shift the top row below the display menu-bar margin.
+                -- Shrink from that accepted position instead of overlapping the next row.
+                set extraW to ((item 3 of actualBounds) - (item 1 of actualBounds)) - ((item 3 of targetBounds) - (item 1 of targetBounds))
+                set extraH to ((item 4 of actualBounds) - (item 2 of actualBounds)) - ((item 4 of targetBounds) - (item 2 of targetBounds))
+                if extraW < 0 then set extraW to 0
+                if extraH < 0 then set extraH to 0
+                if (item 1 of actualBounds) > x then set item 1 of targetBounds to item 1 of actualBounds
+                if (item 2 of actualBounds) > y then set item 2 of targetBounds to item 2 of actualBounds
+                set item 3 of targetBounds to rightEdge - extraW
+                set item 4 of targetBounds to bottomEdge - extraH
+            end repeat
+            if not fitted then set failedCount to failedCount + 1
+        on error
+            set failedCount to failedCount + 1
         end try
     end repeat
 
     activate
 end tell
 
+if failedCount > 0 then return (failedCount as text) & " windows could not fit; use fewer windows or more space."
 return (winCount as text) & " windows tiled " & (gridC as text) & "x" & (gridR as text)
 APPLESCRIPT
-  )
+  ) || { echo "$result"; return 1; }
   echo "$result"
+  [[ "$result" != *"windows could not fit"* ]]
 }

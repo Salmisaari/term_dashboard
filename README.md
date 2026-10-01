@@ -7,7 +7,7 @@ Scan active sessions, tile windows, send prompts, and get morning overviews — 
 ```
 td status
 /dev/ttys004    ● Claude  pepe
-/dev/ttys003    ● Claude  droppe-returns
+/dev/ttys003    ● Claude  my-api
 /dev/ttys002    ○ shell   ~
 ```
 
@@ -22,6 +22,7 @@ td status
 | **Xcode Command Line Tools** | For Swift compiler (`xcode-select --install`) |
 | **Bash 5+** | macOS ships with bash 3; install via `brew install bash` |
 | **jq** | `brew install jq` |
+| **Python 3.9+** | Ships with Xcode Command Line Tools; no extra packages |
 | **[Homebrew](https://brew.sh)** | Recommended for installing deps |
 | **Claude / Claudex / Codex / Hermes / Grok** | Optional — install the CLI you want Quick Add to launch |
 | **GitHub CLI (`gh`)** | Optional — for `td standup` PR/CI status |
@@ -150,7 +151,9 @@ td kick api   "run the tests"
 ---
 
 ### `td start <project> [project ...]`
-Open new iTerm window(s) for registered projects, `cd`'d into each project directory.
+Open new iTerm window(s) for registered projects, `cd`'d into each project directory, and start `claude --dangerously-skip-permissions`.
+
+> **Note:** `td start` and the menu bar's Quick Add launch agents with their permission/approval bypass flags (`--dangerously-skip-permissions`, `--dangerously-bypass-approvals-and-sandbox`, `--yolo`, `--always-approve`). Only use them in projects where you accept that.
 
 ```bash
 td start myapp
@@ -213,6 +216,21 @@ The first launch compiles the Swift source — takes ~10 seconds. Subsequent lau
 
 ---
 
+### `td awake`
+Keep the Mac working with the lid closed for 1h / 4h / 24h, on power or battery. Stops at 10% battery.
+
+```bash
+td awake setup      # One-time: installs a root helper (asks for your admin password)
+td awake 4h         # Start a timer; no argument cycles off → 1h → 4h → 24h
+td awake status
+td awake off
+td awake uninstall  # Restore normal sleep and remove the helper
+```
+
+Setup installs `/Library/PrivilegedHelperTools/com.td.awake` and `/Library/LaunchDaemons/com.td.awake.plist`. It accepts only fixed timer commands from your user. Emergency reset: `sudo pmset -a disablesleep 0`. Details: [docs/prd/closed-lid-awake.md](docs/prd/closed-lid-awake.md).
+
+---
+
 ## Claude Code Integration (Hooks)
 
 If you use Claude Code, `td` can track what each session is doing in real time. The installer offers to add hooks automatically. To add them manually:
@@ -246,6 +264,7 @@ With hooks active, `td status` shows the last prompt each session received.
 ## Uninstall
 
 ```bash
+td awake uninstall   # Only if you ran td awake setup
 rm ~/bin/td
 rm -rf ~/.config/td
 # Remove hooks from ~/.claude/settings.json if you added them

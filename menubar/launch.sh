@@ -37,13 +37,14 @@ fi
 mkdir -p "$app/Contents/MacOS"
 # A new inode avoids macOS retaining the old executable's cached signature.
 /usr/bin/install -m 755 "$bin" "$app/Contents/MacOS/TD"
-mkdir -p "$app/Contents/Resources/dashboard" "$app/Contents/Resources/lib"
+mkdir -p "$app/Contents/Resources/dashboard" "$app/Contents/Resources/lib" "$app/Contents/Resources/menubar"
 cp "$ROOT/menubar/runtime.sh" "$app/Contents/Resources/td"
 chmod 755 "$app/Contents/Resources/td"
-for module in __init__ bridge core native cli; do
+for module in __init__ awake bridge core native cli; do
   cp "$ROOT/dashboard/$module.py" "$app/Contents/Resources/dashboard/$module.py"
 done
 cp "$ROOT/lib/awake.sh" "$ROOT/lib/tile.sh" "$app/Contents/Resources/lib/"
+cp "$ROOT/menubar/awake-setup.sh" "$ROOT/menubar/td-awake.swift" "$app/Contents/Resources/menubar/"
 cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -90,10 +91,11 @@ if [[ -w /Applications ]]; then
   cp "$app/Contents/Info.plist" /Applications/TD.app/Contents/Info.plist
   mkdir -p /Applications/TD.app/Contents/_CodeSignature
   cp "$app/Contents/_CodeSignature/CodeResources" /Applications/TD.app/Contents/_CodeSignature/CodeResources
-  mkdir -p /Applications/TD.app/Contents/Resources/dashboard /Applications/TD.app/Contents/Resources/lib
+  mkdir -p /Applications/TD.app/Contents/Resources/dashboard /Applications/TD.app/Contents/Resources/lib /Applications/TD.app/Contents/Resources/menubar
   cp "$app/Contents/Resources/td" /Applications/TD.app/Contents/Resources/td
   cp "$app/Contents/Resources/dashboard/"*.py /Applications/TD.app/Contents/Resources/dashboard/
   cp "$app/Contents/Resources/lib/"*.sh /Applications/TD.app/Contents/Resources/lib/
+  cp "$app/Contents/Resources/menubar/"* /Applications/TD.app/Contents/Resources/menubar/
   installed=/Applications/TD.app
 fi
 xattr -dr com.apple.FinderInfo "$installed" 2>/dev/null || true

@@ -3,6 +3,7 @@ import concurrent.futures
 import json
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import time
 
@@ -154,12 +155,28 @@ end run
 '''
 
 
-def provider_for(commands, title=""):
+def is_python(command):
+    return re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", Path(command).name.lower()) is not None
+
+
+def provider_for(commands, title="", arguments=""):
     for provider in ("claudex", "claude", "codex", "hermes", "grok"):
         # Titles alone are not proof that an agent process is still alive.
         for command in commands:
             if Path(command).name.lower().lstrip("-") in (provider, provider + ".exe"):
                 return provider
+    # Console scripts such as Hermes keep Python as their executable identity.
+    # Only inspect the script position, never a prompt or another script's args.
+    if arguments and any(is_python(command) for command in commands):
+        try:
+            lexer = shlex.shlex(arguments, posix=True)
+            lexer.whitespace_split = True
+            lexer.commenters = ""
+            executable, script = lexer.get_token(), lexer.get_token()
+        except ValueError:
+            return "shell"
+        if executable and script and is_python(executable) and not script.startswith("-"):
+            return provider_for([script])
     return "shell"
 
 
@@ -199,6 +216,22 @@ class MacBridge:
                 "pid": int(fields[0]), "ppid": int(fields[1]), "stat": fields[3],
                 "started": " ".join(fields[4:9]), "command": fields[9]})
         sources, warnings = [], []
+        python_processes = {p["pid"]: p for processes in by_tty.values() for p in processes
+                            if is_python(p["command"])}
+        if python_processes:
+            try:
+                arguments = run(["ps", "-ww", "-p", ",".join(str(pid) for pid in sorted(python_processes)),
+                                 "-o", "pid=,args="], timeout=8)
+                for line in arguments.splitlines():
+                    fields = line.split(None, 1)
+                    if len(fields) == 2 and fields[0].isdigit() and int(fields[0]) in python_processes:
+                        process = python_processes[int(fields[0])]
+                        process["provider"] = provider_for([process["command"]], arguments=fields[1])
+            except BridgeError:
+                warnings.append("Python agent detection unavailable; refresh to reconnect.")
+        for processes in by_tty.values():
+            for process in processes:
+                process.setdefault("provider", provider_for([process["command"]]))
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             futures = [(app, pool.submit(run, ["osascript", "-e", script], 12))
                        for app, script in (("iTerm2", ITERM_DISCOVERY), ("Terminal", TERMINAL_DISCOVERY))]
@@ -217,7 +250,7 @@ class MacBridge:
         selected = {}
         for row in sources:
             processes = by_tty.get(row["tty"], [])
-            agents = [p for p in processes if provider_for([p["command"]]) != "shell"]
+            agents = [p for p in processes if p["provider"] != "shell"]
             shells = [p for p in processes if Path(p["command"]).name.lstrip("-") in ("zsh", "bash", "fish", "sh", "nu")]
             # Prefer the deepest/newest agent over its launcher wrapper.
             selected[row["tty"]] = (max(agents, key=lambda p: p["pid"]) if agents else
@@ -245,7 +278,7 @@ class MacBridge:
         for row in sources:
             process = selected[row["tty"]]
             cwd = row.get("cwd") or (cwds.get(str(process["pid"]), "") if process else "")
-            provider = provider_for([process["command"]]) if process else "shell"
+            provider = process["provider"] if process else "shell"
             instance = f'{process["pid"]}:{process["started"]}' if process else "unknown"
             app = row["app"]
             ident = f'{app}:{row["native_id"]}'
@@ -268,7 +301,7 @@ class MacBridge:
         return redact(result) if action == "read" else result.strip()
 
     def awake(self, duration):
-        return run([str(ROOT / "td"), "awake", duration], timeout=8).strip()
+        return run([str(ROOT / "td"), "awake", duration], timeout=12).strip()
 
 
 class DemoBridge:

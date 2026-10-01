@@ -11,7 +11,8 @@ import threading
 import time
 import uuid
 
-from .bridge import BridgeError, ROOT, is_awake_process
+from .bridge import BridgeError, ROOT
+from .awake import status as awake_status
 
 REPORT_TTL = 600
 SNAPSHOT_TTL = 30
@@ -411,15 +412,7 @@ A delivery receipt only proves submission, never task completion.
         if self.bridge.demo:
             with self.db() as conn:
                 return self.get(conn, "awake", {"state": "off", "end_ts": 0})
-        try:
-            state = json.loads((self.config / "awake.state").read_text())
-            if state.get("state") not in ("1h", "4h", "24h") or state.get("end_ts", 0) <= time.time() or int(state.get("pid", 0)) <= 0:
-                return {"state": "off", "end_ts": 0}
-            if not is_awake_process(int(state["pid"])):
-                return {"state": "off", "end_ts": 0}
-            return {"state": state["state"], "end_ts": state["end_ts"]}
-        except (OSError, ValueError, TypeError):
-            return {"state": "off", "end_ts": 0}
+        return awake_status(self.config)
 
     def awake(self, duration):
         if duration not in ("off", "1h", "4h", "24h"):

@@ -217,7 +217,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         providerButton.toolTip = "click: next agent · claude → claudex → codex → hermes → grok"
         countButton = button("···", 291, 5, 46, on: canvas) { [weak self] in
             guard let self = self else { return }
-            if self.expanded { self.expanded = false; self.layout() }
+            if self.expanded && !self.swapMode { self.expanded = false; self.layout() }
             else { self.expand("sessions") }
         }
         countButton.setAccessibilityLabel("Show terminal sessions"); countButton.toolTip = "All terminals · ⌘L"
@@ -253,7 +253,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         fetch()
     }
     func expand(_ tab: String) {
-        expanded = true; detailsVisible = false; selectedProposal = nil
+        swapMode = false; expanded = true; detailsVisible = false; selectedProposal = nil
         mode = tab; query = ""; scrollOffset = 0; keyboardIndex = 0; layout()
     }
     func goBack() {
@@ -266,7 +266,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
     }
     func saveDraft() { drafts[draftKey] = composer.string }
     func newSession() {
-        saveDraft(); selectedID = nil; selectedProposal = nil; inspection = nil; mode = "new"; query = ""
+        saveDraft(); swapMode = false; selectedID = nil; selectedProposal = nil; inspection = nil; mode = "new"; query = ""
         composer.string = drafts[draftKey] ?? ""; folderField.stringValue = (folder as NSString).lastPathComponent
         expanded = true; detailsVisible = false; keyboardIndex = 0; layout(); folderField.selectText(nil)
     }
@@ -317,6 +317,9 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         statusItem?.button?.toolTip = "TD · \(Int(counts.number("total"))) terminals · \(attention) updates"
         let awake = state.record("awake").text("state", "off")
         awakeButton.title = awake == "off" ? "awake" : awake; awakeButton.contentTintColor = awake == "off" ? .secondaryLabelColor : accent
+        let awakeState = state.record("awake")
+        awakeButton.toolTip = awakeState.text("error").isEmpty ? awakeState.text("message", "Keep awake timer") : awakeState.text("error")
+        if !awakeState.text("error").isEmpty || (awake != "off" && !demo && !awakeState.flag("closed_lid")) { awakeButton.contentTintColor = .systemOrange }
         if swapMode && swapCandidates().count > 1 {
             height += layoutSwapPicker()
         } else if expanded {
@@ -648,7 +651,8 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
                 if let input = input { try stdin.fileHandleForWriting.write(contentsOf: JSONSerialization.data(withJSONObject: input)) }
                 try stdin.fileHandleForWriting.close()
                 let timeout = DispatchWorkItem { if process.isRunning { process.terminate() } }
-                DispatchQueue.global().asyncAfter(deadline: .now()+40, execute: timeout)
+                let seconds: Double = arguments == ["awake", "setup"] ? 300 : 40
+                DispatchQueue.global().asyncAfter(deadline: .now()+seconds, execute: timeout)
                 let data = output.fileHandleForReading.readDataToEndOfFile(); process.waitUntilExit(); timeout.cancel()
                 let decoded = (try? JSONSerialization.jsonObject(with: data)) as? Record
                 let response = decoded ?? (input == nil ? [process.terminationStatus == 0 ? "message" : "error": String(data: data, encoding: .utf8) ?? "Command finished."] : ["error": process.terminationStatus == 0 ? "Unexpected workspace response." : "The workspace did not respond. Your draft is held; refresh to reconnect."])
@@ -705,7 +709,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         let matches = swapCandidates()
         let line = NSView(frame: NSRect(x: 14, y: 0, width: width-28, height: 1)); line.wantsLayer = true
         line.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor; body.addSubview(line)
-        label("Which terminal to leave?", 18, 10, width-36, 18, size: 11, color: .secondaryLabelColor)
+        label("Which terminal in \(folderField.stringValue)?", 18, 10, width-36, 18, size: 11, color: .secondaryLabelColor)
         let document = Canvas(frame: NSRect(x: 0, y: 0, width: width, height: 0))
         var dy: CGFloat = 0
         for session in matches {
@@ -744,6 +748,14 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
     }
     func awakeMenu() {
         let menu = NSMenu()
+        let awake = state.record("awake")
+        let message = awake.flag("closed_lid") ? "Lid closed: protected · battery cutoff 10%" : awake.text("error").isEmpty ? awake.text("message", "Keep awake timer") : awake.text("error")
+        let info = NSMenuItem(title: message, action: nil, keyEquivalent: ""); info.isEnabled = false; menu.addItem(info)
+        if !demo && (!awake.flag("helper_installed") || !awake.text("error").isEmpty) {
+            let setup = NSMenuItem(title: "Set up closed-lid mode…", action: #selector(setupAwake), keyEquivalent: "")
+            setup.target = self; menu.addItem(setup)
+        }
+        menu.addItem(.separator())
         for (title, duration) in [("Off", "off"), ("1 hour", "1h"), ("4 hours", "4h"), ("24 hours", "24h")] {
             let i = NSMenuItem(title: title, action: #selector(pickAwake(_:)), keyEquivalent: "")
             i.target = self; i.representedObject = duration; i.state = state.record("awake").text("state", "off") == duration ? .on : .off; menu.addItem(i)
@@ -751,6 +763,14 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         menu.popUp(positioning: nil, at: NSPoint(x: 325, y: 28), in: canvas)
     }
     @objc func pickAwake(_ item: NSMenuItem) { act("awake", ["duration": item.representedObject as? String ?? "off"]) }
+    @objc func setupAwake() {
+        guard !demo else { return }
+        receipt = "Setting up closed-lid mode. Complete the macOS authentication dialog."; receiptDate = Date(); layout()
+        run(["awake", "setup"], urgent: true) { [weak self] response in
+            guard let self = self else { return }
+            self.error = response.text("error"); self.receipt = response.text("message"); self.receiptDate = Date(); self.fetch(force: true)
+        }
+    }
     func showMenu() {
         let m = NSMenu()
         for (title, action) in [("Quick Add", #selector(menuQuick)), ("All terminals", #selector(menuSessions)), ("Tile windows", #selector(menuTile)), ("Auto-tile on Space change", #selector(menuAutoTile)), ("Quit TD", #selector(menuQuit))] {

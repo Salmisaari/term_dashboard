@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # tests/test-tile.sh — regression tests for per-display tiling orchestration
 
-set -u
+set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "${ROOT}/lib/tile.sh"
@@ -10,6 +10,8 @@ PASS=0
 FAIL=0
 FIXTURE=""
 TILE_CALLS=""
+SNAP_CALLS=""
+SNAP_STATUS=1
 
 ok() {
   echo "  PASS: $1"
@@ -48,7 +50,8 @@ tile_layout() {
 }
 
 snap_main_window() {
-  return 1
+  SNAP_CALLS="$*"
+  return "$SNAP_STATUS"
 }
 
 FIXTURE=$'SCREEN\t1\t0\t34\t1440\t866\nSCREEN\t2\t-1920\t0\t1920\t1080\nITERM\t101\t1\nITERM\t102\t1\nITERM\t201\t2\nMAIN\t301\t1\tGoogle Chrome\t0\t34\t792\t866\nMAIN\t302\t2\tSafari\t-1920\t0\t1056\t1080'
@@ -124,6 +127,54 @@ assert_equals \
   "terminals sit beside the largest Chrome window" \
   '4||50|1,2|1796|-1080|864|1080' \
   "$TILE_CALLS"
+
+echo ""
+echo "Test 9: a wide Chrome window keeps its size"
+FIXTURE=$'SCREEN\t1\t0\t28\t1440\t900\nITERM\t11\t1\nMAIN\t99\t1\tGoogle Chrome\t0\t28\t1152\t900'
+TILE_CALLS=""; SNAP_CALLS=""; SNAP_STATUS=0
+td_tile >/dev/null
+assert_equals "terminals use the actual remaining 20 percent" '4||50|11|1152|28|288|900' "$TILE_CALLS"
+assert_equals "default tiling never resizes Chrome" "" "$SNAP_CALLS"
+
+echo ""
+echo "Test 10: browser resizing requires an explicit size request"
+TILE_CALLS=""; SNAP_CALLS=""
+td_tile --main-size 60 >/dev/null
+assert_equals "explicit browser width is honored" 'Google Chrome 0 28 864 900' "$SNAP_CALLS"
+assert_equals "terminals use the space after the explicit browser resize" '4||60|11|864|28|576|900' "$TILE_CALLS"
+
+echo ""
+echo "Test 11: off-center Chrome still puts terminals on its right"
+FIXTURE=$'SCREEN\t1\t0\t28\t1440\t900\nITERM\t11\t1\nMAIN\t99\t1\tGoogle Chrome\t600\t28\t500\t900'
+TILE_CALLS=""; SNAP_CALLS=""
+td_tile >/dev/null
+assert_equals "larger free space on the left does not move terminals away from Chrome's right" '4||50|11|1100|28|340|900' "$TILE_CALLS"
+
+echo ""
+echo "Test 12: a full-width browser is not covered by a fallback grid"
+FIXTURE=$'SCREEN\t1\t0\t28\t1440\t900\nITERM\t11\t1\nMAIN\t99\t1\tGoogle Chrome\t0\t28\t1440\t900'
+TILE_CALLS=""; SNAP_CALLS=""
+if td_tile >/dev/null; then
+  fail "no-room layout must not report success"
+else
+  ok "no-room layout reports failure to the menu bar"
+fi
+assert_equals "no terminal layout is forced over Chrome" "" "$TILE_CALLS"
+assert_equals "a full-width Chrome is not automatically halved" "" "$SNAP_CALLS"
+
+echo ""
+echo "Test 13: Chrome takes priority over a larger non-browser window"
+FIXTURE=$'SCREEN\t1\t0\t28\t1440\t900\nITERM\t11\t1\nMAIN\t98\t1\tSlack\t0\t28\t1200\t900\nMAIN\t99\t1\tGoogle Chrome\t0\t28\t800\t900'
+TILE_CALLS=""
+td_tile >/dev/null
+assert_equals "terminals stay beside Chrome" '4||50|11|800|28|640|900' "$TILE_CALLS"
+
+echo ""
+echo "Test 14: only the visible area of a main window counts"
+FIXTURE=$'SCREEN\t1\t0\t28\t1440\t900\nITERM\t11\t1\nMAIN\t98\t1\tPreview\t-35\t841\t1460\t895\nMAIN\t99\t1\tSlack\t0\t28\t800\t900'
+TILE_CALLS=""
+td_tile >/dev/null
+assert_equals "a mostly offscreen Preview does not displace the main window" '4||50|11|800|28|640|900' "$TILE_CALLS"
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

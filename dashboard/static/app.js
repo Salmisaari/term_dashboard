@@ -80,6 +80,8 @@ function render(force=false) {
   $('#date-label').textContent=date.toUpperCase();
   $('#freshness').textContent=state.updated_at ? `${state.demo?'Demo':'Local'} · Updated ${ago(state.updated_at)}${stale?' · waiting for a fresh scan':''}`:'Waiting for first scan';
   $('#awake-select').value=state.awake.state || 'off';
+  $('#awake-select').title=state.awake.error || state.awake.message || 'Keep awake timer';
+  $('#awake-status').textContent=state.awake.closed_lid?'Lid protected':state.awake.state!=='off'&&!state.demo?'Lid unprotected':'◔';
   const labels={overview:['Overview','A little room to think.','Your terminals keep moving. Find your next small step here.'],sessions:['All terminals','Everything has a place.','Find the right session. Pick up where you left off.'],activity:['Activity','The loops are held.','What changed, what was sent, and what needs your review.']};
   $('#view-label').textContent=labels[currentView][0]; $('#page-title').textContent=labels[currentView][1]; $('#page-subtitle').textContent=labels[currentView][2];
   document.querySelectorAll('.nav-item').forEach(b => { b.classList.toggle('active',b.dataset.view===currentView); b.setAttribute('aria-current',b.dataset.view===currentView?'page':'false'); });

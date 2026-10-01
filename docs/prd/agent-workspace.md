@@ -1,7 +1,7 @@
 # Terminal workspace
 
 ## Goal
-Give Johannes a calm, local home for open terminals: one next action, an accurate inventory, durable receipts, and a portable contract that lets a chosen agent navigate sessions. Edward is the proof case, including duplicate Edward terminals.
+Give the user a calm, local home for open terminals: one next action, an accurate inventory, durable receipts, and a portable contract that lets a chosen agent navigate sessions. Edward is the proof case, including duplicate Edward terminals.
 
 ## Scope and chosen design
 The native menu bar is the primary home, as clarified by the user's screenshot. Keep the existing dark two-line Quick Add panel and expand beneath it for sessions, updates, and navigator controls. A native AppKit panel talks directly to the shared Python state/bridge via structured local commands; it does not require a web server or browser. The earlier browser UI remains an optional secondary surface. The user requested independent execution, so architectural choices are made here without a confirmation gate.

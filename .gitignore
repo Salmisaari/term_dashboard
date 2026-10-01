@@ -3,3 +3,6 @@ menubar/TD.app/
 .DS_Store
 __pycache__/
 *.pyc
+# iCloud duplicate copies
+* [0-9]
+* [0-9].*

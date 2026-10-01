@@ -38,6 +38,14 @@ delegate.didRespond = { action in
     case 0:
         delegate.timer?.invalidate()
         check(delegate.sessions.count == 6, "Native inventory loaded without HTTP")
+        let savedAwake = delegate.state["awake"]
+        delegate.state["awake"] = ["state": "4h", "closed_lid": true, "message": "Closed-lid awake · stops at 10% battery."]
+        delegate.layout()
+        check(delegate.awakeButton.title == "4h" && delegate.awakeButton.toolTip?.contains("Closed-lid awake") == true, "Awake control explains closed-lid protection")
+        delegate.state["awake"] = ["state": "off", "error": "Cannot verify closed-lid protection."]
+        delegate.layout()
+        check(delegate.awakeButton.toolTip == "Cannot verify closed-lid protection." && delegate.awakeButton.contentTintColor == .systemOrange, "Awake failure remains visible when timer is off")
+        delegate.state["awake"] = savedAwake
         delegate.panel.orderOut(nil)
         delegate.pending = true // Exercise presentation without starting another discovery request.
         delegate.statusItem.button!.performClick(nil)
@@ -188,6 +196,24 @@ delegate.didRespond = { action in
         other!.performClick(nil)
         check(delegate.selectedID == "demo:9", "Clicking a row chooses that terminal")
         check(delegate.provider == "grok", "Choosing a terminal does not change the destination agent")
+        delegate.countButton.performClick(nil)
+        check(!delegate.swapMode && delegate.expanded && delegate.mode == "sessions", "Session count exits the project swap picker into all terminals")
+        let allRows = descendants(delegate.body).compactMap { $0 as? SessionRow }
+        check(allRows.count == delegate.sessions.count, "All projects are visible after leaving the swap picker")
+        let hermes = allRows.first { $0.session.text("provider") == "hermes" }
+        check(hermes != nil, "The Hermes session in another project is available")
+        hermes!.performClick(nil)
+        let hermesID = delegate.selectedID
+        delegate.pickerButton.performClick(nil)
+        check(delegate.swapMode && delegate.sourceSession()?.text("id") == hermesID && delegate.error.isEmpty, "Selecting Hermes from all terminals arms the exact Hermes source")
+        check(delegate.provider == "grok", "Switching source projects retains the destination agent")
+        delegate.expand("sessions")
+        check(!delegate.swapMode && descendants(delegate.body).compactMap { $0 as? SessionRow }.count == delegate.sessions.count, "The sessions keyboard shortcut also exits swap mode")
+        delegate.pickerButton.performClick(nil)
+        delegate.newSession()
+        check(!delegate.swapMode && delegate.mode == "new" && delegate.selectedID == nil, "New terminal navigation clears the previous swap")
+        delegate.folderField.stringValue = "penny_agent"
+        delegate.pickerButton.performClick(nil)
         delegate.goBack()
         check(!delegate.swapMode && !delegate.expanded, "Escape closes the picker")
         screenshot("td-native-compact")
