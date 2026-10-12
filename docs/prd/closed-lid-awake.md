@@ -80,8 +80,9 @@ checks, especially on this Mac's macOS 27 beta.
   lid-closed samples. This checks lid-open continuity, not closed-lid operation.
 
 - 2026-10-12: the corrected helper (IOKit read) is installed. A real 1h timer held
-  `SleepDisabled=1` for 30 seconds of polling; Off restored sleep. The header pill
-  is now one click on (24h) / off; right-click keeps the timer menu.
+  `SleepDisabled=1` for 30 seconds of polling; Off restored sleep. Each click on the
+  header pill steps off → 1h → 4h → 24h → off and the pill counts down;
+  right-click keeps the timer menu.
 
 Commands: `bash tests/test-awake-helper.sh`, `python3 -B -I tests/test_awake.py`,
 `python3 -B -I tests/test_native.py`, `python3 -B -I tests/test_workspace.py`,

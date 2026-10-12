@@ -23,7 +23,7 @@ development `td` command remains available from the repository.
 - **Navigation:** choose an agent terminal and turn on **Let this agent navigate**, then **Copy handoff** and paste it into that agent. Awaiting check-in means the grant is ready; Checked in means the agent used it within 90 seconds. Quiet and Disconnected are explicit. Turning on the grant does not start a hidden model worker.
 - **Updates:** agent reports, recent receipts, and proposed prompts appear here. Review shows the exact destination and full prompt. Approve requires a fresh waiting report for that process instance. A receipt confirms submission; completion needs the agent's evidence.
 - **Pause:** revoke the navigator from any expanded view, including during discovery or an outage. This cancels pending proposals and invalidates the old handoff; it cannot undo a prompt already delivered or interrupt work already started.
-- **Awake:** one click on the header pill turns closed-lid awake on (24 hours) or off; right-click it for 1 or 4 hours or setup. A missing helper is installed on the first click. Right-click the menu icon for tiling, optional auto-tile on Space changes, and Quit.
+- **Awake:** each click on the header pill steps closed-lid awake off → 1h → 4h → 24h → off, and the pill counts down the time left. Right-click it for the timer menu or setup. A missing helper is installed on the first click. Right-click the menu icon for tiling, optional auto-tile on Space changes, and Quit.
 
 Keyboard: `⌘L` sessions/search, `⌘N` new terminal, `⌘R` refresh, arrows then Return
 to select a search result, Shift–Return for a new prompt line, Escape to step back

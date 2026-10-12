@@ -40,3 +40,6 @@ Scrubbed a username, first name and employer project name from tests/docs, docum
 
 ## [2026-10-12] fix | One-click awake, new projects and Return in Quick Add
 Awake pill toggles 24h/off in one click (right-click: timers); reinstalled the stale root helper; typing an unknown project name creates it in Desktop/Code; Return launches in the typed project and is no longer swallowed by background refreshes.
+
+## [2026-10-12] change | Awake pill cycles timers and counts down
+Clicks step off → 1h → 4h → 24h → off (matching `td awake`); the pill shows the remaining time, ticking each second while the panel is open.

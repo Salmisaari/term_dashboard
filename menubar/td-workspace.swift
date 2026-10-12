@@ -136,6 +136,8 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
     var keyMonitor: Any?
     var outsideMonitor: Any?
     var timer: Timer?
+    var countdown: Timer?
+    var pendingAwake: String?
     var autoTile = false
     var keyboardIndex = 0
     var activeRequest = UUID()
@@ -199,6 +201,10 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
             guard let self = self else { return }
             if self.panel.isVisible || Date().timeIntervalSince(self.lastRefresh) >= 15 { self.fetch() }
         }
+        countdown = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self = self, self.panel.isVisible else { return }
+            self.updateAwake()
+        }
         fetch()
         if !snapshotMode && !CommandLine.arguments.contains("--headless") && (demo || CommandLine.arguments.contains("--show")) { show() }
     }
@@ -239,6 +245,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         countButton.wantsLayer = true; countButton.layer?.cornerRadius = 5; countButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
         awakeButton = button("awake", 341, 5, 52, on: canvas) { [weak self] in self?.toggleAwake() }
         awakeButton.secondary = { [weak self] in self?.awakeMenu() }
+        awakeButton.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         awakeButton.setAccessibilityLabel("Keep awake timer")
         composerScroll = NSScrollView(frame: NSRect(x: 25, y: 28, width: width-45, height: 20))
         composerScroll.drawsBackground = false; composerScroll.hasVerticalScroller = false
@@ -335,11 +342,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         countButton.contentTintColor = warning ? .systemOrange : attention > 0 || Date().timeIntervalSince(receiptDate) < 8 ? accent : .secondaryLabelColor
         statusItem?.button?.title = attention > 0 ? " \(attention)" : ""
         statusItem?.button?.toolTip = "TD · \(Int(counts.number("total"))) terminals · \(attention) updates"
-        let awake = state.record("awake").text("state", "off")
-        awakeButton.title = awake == "off" ? "awake" : awake; awakeButton.contentTintColor = awake == "off" ? .secondaryLabelColor : accent
-        let awakeState = state.record("awake")
-        awakeButton.toolTip = awakeState.text("error").isEmpty ? awakeState.text("message", "Keep awake timer") : awakeState.text("error")
-        if !awakeState.text("error").isEmpty || (awake != "off" && !demo && !awakeState.flag("closed_lid")) { awakeButton.contentTintColor = .systemOrange }
+        updateAwake()
         if swapMode && swapCandidates().count > 1 {
             height += layoutSwapPicker()
         } else if expanded {
@@ -678,7 +681,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         let sourceDraft = draftKey; let sentDraft = composer?.string ?? ""
         layout()
         run(["workspace"] + (demo ? ["--demo"] : []), input: request, urgent: skipQueue) { [weak self] response in
-            guard let self = self, self.activeRequest == requestID else { return }; self.pending = false; self.pendingRead = false; self.lastRefresh = Date()
+            guard let self = self, self.activeRequest == requestID else { return }; self.pending = false; self.pendingRead = false; self.pendingAwake = nil; self.lastRefresh = Date()
             if let problem = response["error"] as? String { self.error = problem }
             else {
                 self.state = response.record("state")
@@ -815,6 +818,18 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         defaults.set(provider, forKey: "td.selectedLaunchAgent")
         if swapMode || selectedID == nil { layout() } else { newSession() }
     }
+    // The pill counts down the remaining time; a just-clicked timer shows its name until confirmed.
+    func updateAwake() {
+        let awakeState = state.record("awake"), awake = awakeState.text("state", "off")
+        let left = max(0, Int(awakeState.number("end_ts") - Date().timeIntervalSince1970))
+        if let next = pendingAwake { awakeButton.title = next == "off" ? "awake" : next }
+        else if awake == "off" { awakeButton.title = "awake" }
+        else if awakeState.number("end_ts") == 0 { awakeButton.title = awake }
+        else { awakeButton.title = left >= 3600 ? String(format: "%d:%02d:%02d", left/3600, left/60%60, left%60) : String(format: "%d:%02d", left/60, left%60) }
+        awakeButton.contentTintColor = (pendingAwake ?? awake) == "off" ? .secondaryLabelColor : accent
+        awakeButton.toolTip = (awakeState.text("error").isEmpty ? awakeState.text("message", "Keep awake timer") : awakeState.text("error")) + "\nclick: 1h → 4h → 24h → off · right-click: menu"
+        if !awakeState.text("error").isEmpty || (awake != "off" && !demo && !awakeState.flag("closed_lid")) { awakeButton.contentTintColor = .systemOrange }
+    }
     func awakeMenu() {
         let menu = NSMenu()
         let awake = state.record("awake")
@@ -832,12 +847,14 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         menu.popUp(positioning: nil, at: NSPoint(x: 325, y: 28), in: canvas)
     }
     @objc func pickAwake(_ item: NSMenuItem) { act("awake", ["duration": item.representedObject as? String ?? "off"]) }
-    // One click: on (longest timer) or off. Right-click chooses a shorter timer.
+    // Each click steps off → 1h → 4h → 24h → off, like `td awake` without an argument.
     func toggleAwake() {
         let awake = state.record("awake")
         guard !awake.isEmpty else { fetch(force: true); return }
-        if !demo && !awake.flag("helper_installed") { installAwake(then: "24h"); return }
-        act("awake", ["duration": awake.text("state", "off") == "off" ? "24h" : "off"])
+        let order = ["off", "1h", "4h", "24h"]
+        let next = order[((order.firstIndex(of: pendingAwake ?? awake.text("state", "off")) ?? 0) + 1) % order.count]
+        if !demo && !awake.flag("helper_installed") { installAwake(then: next == "off" ? "1h" : next); return }
+        pendingAwake = next; act("awake", ["duration": next])
     }
     @objc func setupAwake() { installAwake(then: nil) }
     func installAwake(then duration: String?) {

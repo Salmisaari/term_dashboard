@@ -44,7 +44,7 @@ delegate.didRespond = { action in
         check(delegate.awakeButton.title == "4h" && delegate.awakeButton.toolTip?.contains("Closed-lid awake") == true, "Awake control explains closed-lid protection")
         delegate.state["awake"] = ["state": "off", "error": "Cannot verify closed-lid protection."]
         delegate.layout()
-        check(delegate.awakeButton.toolTip == "Cannot verify closed-lid protection." && delegate.awakeButton.contentTintColor == .systemOrange, "Awake failure remains visible when timer is off")
+        check(delegate.awakeButton.toolTip?.hasPrefix("Cannot verify closed-lid protection.") == true && delegate.awakeButton.contentTintColor == .systemOrange, "Awake failure remains visible when timer is off")
         delegate.state["awake"] = savedAwake
         delegate.panel.orderOut(nil)
         delegate.pending = true // Exercise presentation without starting another discovery request.
@@ -244,13 +244,23 @@ delegate.didRespond = { action in
         check(delegate.drafts["new:" + target.text("path")] == "A prompt for the typed project", "The prompt travels with its destination")
     case 10:
         check(action == "launch" && delegate.error.isEmpty && delegate.receipt.contains("new terminal would open"), "Typed-project launch reached the workspace")
+        let widest = ("23:59:59" as NSString).size(withAttributes: [.font: delegate.awakeButton.font!]).width
+        check(widest <= delegate.awakeButton.cell!.titleRect(forBounds: delegate.awakeButton.bounds).width, "The longest countdown fits the awake pill")
         delegate.pending = true; delegate.pendingRead = true
         stage = 11; delegate.awakeButton.performClick(nil)
+        check(delegate.awakeButton.title == "1h", "A click names the chosen timer at once")
     case 11:
-        check(delegate.state.record("awake").text("state") == "24h" && delegate.awakeButton.title == "24h", "One click turns awake on, even during a refresh")
+        check(delegate.state.record("awake").text("state") == "1h" && ["59:59", "1:00:00"].contains(delegate.awakeButton.title), "One click starts 1h and counts down, even during a refresh")
         stage = 12; delegate.awakeButton.performClick(nil)
     case 12:
-        check(delegate.state.record("awake").text("state") == "off" && delegate.awakeButton.title == "awake", "A second click turns awake off")
+        check(delegate.state.record("awake").text("state") == "4h" && delegate.awakeButton.title.hasPrefix("3:59:") || delegate.awakeButton.title == "4:00:00", "The next click switches to 4h")
+        stage = 13; delegate.awakeButton.performClick(nil)
+    case 13:
+        check(delegate.state.record("awake").text("state") == "24h" && delegate.awakeButton.title.hasPrefix("23:59:") || delegate.awakeButton.title == "24:00:00", "The next click switches to 24h")
+        screenshot("td-native-awake-countdown")
+        stage = 14; delegate.awakeButton.performClick(nil)
+    case 14:
+        check(delegate.state.record("awake").text("state") == "off" && delegate.awakeButton.title == "awake", "The click after 24h turns awake off")
         restoreClipboard(); print("Native AppKit Edward workflow passed."); exit(0)
     default: break
     }
