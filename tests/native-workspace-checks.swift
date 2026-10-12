@@ -217,6 +217,40 @@ delegate.didRespond = { action in
         delegate.goBack()
         check(!delegate.swapMode && !delegate.expanded, "Escape closes the picker")
         screenshot("td-native-compact")
+        let folders = delegate.state.records("folders")
+        check(!folders.isEmpty, "Desktop/Code projects are listed for Quick Add")
+        let current = folders[0], target = folders[folders.count/2]
+        delegate.folder = current.text("path"); delegate.selectedID = nil; delegate.query = ""
+        delegate.showList(); delegate.goBack()
+        check(delegate.folderField.stringValue == current.text("name"), "Leaving the terminal list names the launch destination again")
+        delegate.newSession()
+        _ = delegate.control(delegate.folderField, textView: delegate.composer, doCommandBy: #selector(NSResponder.insertNewline(_:)))
+        check(delegate.folder == current.text("path") && !delegate.expanded, "Return on the untouched destination keeps it, not the first folder")
+        let fresh = "td-check-new-" + String(UUID().uuidString.prefix(8))
+        delegate.folderField.stringValue = fresh
+        delegate.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification))
+        check(descendants(delegate.body).compactMap { $0 as? ActionButton }.contains { $0.title == "+ New project " + fresh }, "An unknown name offers a new project")
+        _ = delegate.control(delegate.folderField, textView: delegate.composer, doCommandBy: #selector(NSResponder.insertNewline(_:)))
+        check(delegate.folder.hasSuffix("/Desktop/Code/" + fresh) && delegate.folderField.stringValue == fresh && !delegate.expanded, "Return makes the new project the destination")
+        check(!FileManager.default.fileExists(atPath: delegate.folder), "The demo never creates real folders")
+        delegate.folder = current.text("path"); delegate.expand("sessions"); delegate.goBack()
+        delegate.folderField.stringValue = target.text("name")
+        delegate.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification))
+        check(delegate.mode == "new", "Typing in the compact bar searches projects even after browsing terminals")
+        delegate.composer.string = "A prompt for the typed project"; delegate.provider = "codex"
+        delegate.pending = true; delegate.pendingRead = true // A background refresh is still running.
+        stage = 10; delegate.submit()
+        check(delegate.folder == target.text("path") && delegate.busy, "Return launches in the typed project at once, even during a refresh")
+        check(delegate.drafts["new:" + target.text("path")] == "A prompt for the typed project", "The prompt travels with its destination")
+    case 10:
+        check(action == "launch" && delegate.error.isEmpty && delegate.receipt.contains("new terminal would open"), "Typed-project launch reached the workspace")
+        delegate.pending = true; delegate.pendingRead = true
+        stage = 11; delegate.awakeButton.performClick(nil)
+    case 11:
+        check(delegate.state.record("awake").text("state") == "24h" && delegate.awakeButton.title == "24h", "One click turns awake on, even during a refresh")
+        stage = 12; delegate.awakeButton.performClick(nil)
+    case 12:
+        check(delegate.state.record("awake").text("state") == "off" && delegate.awakeButton.title == "awake", "A second click turns awake off")
         restoreClipboard(); print("Native AppKit Edward workflow passed."); exit(0)
     default: break
     }

@@ -79,6 +79,10 @@ checks, especially on this Mac's macOS 27 beta.
   zero TCP connection failures, maximum heartbeat gap 2.14 seconds, and zero
   lid-closed samples. This checks lid-open continuity, not closed-lid operation.
 
+- 2026-10-12: the corrected helper (IOKit read) is installed. A real 1h timer held
+  `SleepDisabled=1` for 30 seconds of polling; Off restored sleep. The header pill
+  is now one click on (24h) / off; right-click keeps the timer menu.
+
 Commands: `bash tests/test-awake-helper.sh`, `python3 -B -I tests/test_awake.py`,
 `python3 -B -I tests/test_native.py`, `python3 -B -I tests/test_workspace.py`,
 `bash tests/test-menubar.sh`, `./td menubar build`, `./td awake status`.

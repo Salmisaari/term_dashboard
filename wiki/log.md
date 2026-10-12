@@ -37,3 +37,6 @@ TD pins `[ui] compact_mode = true` before starting Grok. `/compact-mode` is a to
 ## [2026-10-02] chore | Public-repo privacy pass and closed-lid awake release
 
 Scrubbed a username, first name and employer project name from tests/docs, documented the root awake helper and agent permission-bypass flags in the README, and ignored iCloud duplicate files.
+
+## [2026-10-12] fix | One-click awake, new projects and Return in Quick Add
+Awake pill toggles 24h/off in one click (right-click: timers); reinstalled the stale root helper; typing an unknown project name creates it in Desktop/Code; Return launches in the typed project and is no longer swallowed by background refreshes.

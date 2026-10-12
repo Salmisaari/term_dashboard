@@ -14,6 +14,7 @@ final class KeyPanel: NSPanel { override var canBecomeKey: Bool { true } }
 final class Canvas: NSView { override var isFlipped: Bool { true } }
 final class ActionButton: NSButton {
     var invoke: (() -> Void)?
+    var secondary: (() -> Void)?
     init(_ title: String, frame: NSRect, action: @escaping () -> Void) {
         super.init(frame: frame); self.title = title; self.invoke = action
         target = self; self.action = #selector(fire); isBordered = false
@@ -21,6 +22,17 @@ final class ActionButton: NSButton {
     }
     required init?(coder: NSCoder) { fatalError() }
     @objc func fire() { invoke?() }
+    override func rightMouseDown(with event: NSEvent) {
+        if let secondary = secondary { secondary() } else { super.rightMouseDown(with: event) }
+    }
+}
+// Clicking the destination selects it, so typing replaces the project name.
+final class DestinationField: NSTextField {
+    override func mouseDown(with event: NSEvent) {
+        let editing = currentEditor() != nil
+        super.mouseDown(with: event)
+        if !editing { currentEditor()?.selectAll(nil) }
+    }
 }
 func sessionTitle(_ session: Record) -> String {
     let window = session.text("window_name").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -106,6 +118,9 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
     var query = ""
     var state: Record = [:]
     var pending = false
+    var pendingRead = false
+    // Background reads never hold up a click or Return; the newer request supersedes them.
+    var busy: Bool { pending && !pendingRead }
     var receipt = ""
     var receiptDate = Date.distantPast
     var lastRefresh = Date.distantPast
@@ -208,7 +223,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         panel.contentView = canvas
         pickerButton = button(">", 9, 5, 22, on: canvas) { [weak self] in self?.pickerClicked() }
         pickerButton.toolTip = "click: swap this terminal to another agent"
-        folderField = NSTextField(frame: NSRect(x: 32, y: 6, width: 195, height: 20))
+        folderField = DestinationField(frame: NSRect(x: 32, y: 6, width: 195, height: 20))
         folderField.font = .monospacedSystemFont(ofSize: 12, weight: .semibold); folderField.isBordered = false
         folderField.drawsBackground = false; folderField.focusRingType = .none; folderField.delegate = self
         folderField.placeholderString = "project or terminal"; folderField.stringValue = (folder as NSString).lastPathComponent
@@ -222,7 +237,8 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         }
         countButton.setAccessibilityLabel("Show terminal sessions"); countButton.toolTip = "All terminals · ⌘L"
         countButton.wantsLayer = true; countButton.layer?.cornerRadius = 5; countButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
-        awakeButton = button("awake", 341, 5, 52, on: canvas) { [weak self] in self?.awakeMenu() }
+        awakeButton = button("awake", 341, 5, 52, on: canvas) { [weak self] in self?.toggleAwake() }
+        awakeButton.secondary = { [weak self] in self?.awakeMenu() }
         awakeButton.setAccessibilityLabel("Keep awake timer")
         composerScroll = NSScrollView(frame: NSRect(x: 25, y: 28, width: width-45, height: 20))
         composerScroll.drawsBackground = false; composerScroll.hasVerticalScroller = false
@@ -247,7 +263,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         l.lineBreakMode = .byTruncatingTail; (view ?? body).addSubview(l); return l
     }
     func show(compact: Bool = true) {
-        if compact { expanded = false; swapMode = false }
+        if compact { expanded = false; swapMode = false; restoreDestination() }
         layout(); panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(folder.isEmpty && selectedID == nil ? folderField : composer)
         fetch()
@@ -261,8 +277,12 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         if !expanded { panel.orderOut(nil); return }
         if selectedProposal != nil { selectedProposal = nil; mode = "updates" }
         else if detailsVisible { detailsVisible = false }
-        else { expanded = false }
+        else { expanded = false; restoreDestination() }
         layout()
+    }
+    // The compact bar always names where Return will launch.
+    func restoreDestination() {
+        if selectedID == nil && query.isEmpty { folderField.stringValue = (folder as NSString).lastPathComponent }
     }
     func saveDraft() { drafts[draftKey] = composer.string }
     func newSession() {
@@ -381,18 +401,19 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         let document = Canvas(frame: NSRect(x: 0, y: 0, width: width, height: 0))
         var dy: CGFloat = 0
         if mode == "new" {
-            let folders = state.records("folders").filter { searching.isEmpty || $0.text("name").lowercased().contains(searching) }
+            let folders = folderChoices
             for (index, f) in folders.enumerated() {
-                let b = button(f.text("name"), 16, dy, width-32, on: document) { [weak self] in
-                    guard let self = self else { return }; self.saveDraft(); self.folder = f.text("path")
-                    self.defaults.set(self.folder, forKey: "workspace.folder"); self.query = ""
-                    self.folderField.stringValue = f.text("name"); self.composer.string = self.drafts[self.draftKey] ?? ""
-                    self.expanded = false; self.layout(); self.panel.makeFirstResponder(self.composer)
-                }
+                let b = button(f.text("name"), 16, dy, width-32, on: document) { [weak self] in self?.chooseFolder(f) }
                 b.alignment = .left; b.frame.size.height = 32; b.contentTintColor = .labelColor; dy += 34
                 if index == keyboardIndex && !query.isEmpty { b.wantsLayer = true; b.layer?.cornerRadius = 6; b.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.07).cgColor }
             }
-            if folders.isEmpty {
+            if let name = newProjectName {
+                let b = button("+ New project " + name, 16, dy, width-32, on: document) { [weak self] in
+                    guard let self = self, let f = self.createProject(name) else { return }; self.chooseFolder(f)
+                }
+                b.alignment = .left; b.frame.size.height = 32; b.contentTintColor = accent; dy += 34
+                if keyboardIndex == folders.count { b.wantsLayer = true; b.layer?.cornerRadius = 6; b.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.07).cgColor }
+            } else if folders.isEmpty {
                 label(state.text("folders_error", "No matching folder in Desktop/Code."), 18, 10, width-36, 45, on: document); dy = 70
             }
         } else {
@@ -519,28 +540,71 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         saveDraft(); let hadSelection = selectedID != nil
         selectedID = nil; selectedProposal = nil; inspection = nil; detailsVisible = false
         if hadSelection { composer.string = drafts[draftKey] ?? "" }
-        query = folderField.stringValue; expanded = true; scrollOffset = 0; keyboardIndex = 0
-        if mode == "updates" { mode = "sessions" }; layout()
+        query = folderField.stringValue; scrollOffset = 0; keyboardIndex = 0
+        // Typing from the compact bar picks a project; an open terminal list stays a terminal search.
+        if !expanded { mode = "new" } else if mode == "updates" { mode = "sessions" }
+        expanded = true; layout()
+    }
+    var folderChoices: [Record] {
+        let typed = query.trimmingCharacters(in: .whitespaces)
+        let matches = state.records("folders").filter { typed.isEmpty || $0.text("name").localizedCaseInsensitiveContains(typed) }
+        // An exact name comes first, ahead of longer names that merely contain it.
+        let exact = matches.filter { $0.text("name").caseInsensitiveCompare(typed) == .orderedSame }
+        return exact + matches.filter { $0.text("name").caseInsensitiveCompare(typed) != .orderedSame }
+    }
+    // A typed name with no folder of its own becomes a new project in Desktop/Code.
+    var newProjectName: String? {
+        let name = query.trimmingCharacters(in: .whitespaces)
+        guard mode == "new", !name.isEmpty, !name.contains("/"), !name.hasPrefix("."), state["folders_error"] == nil,
+              !state.records("folders").contains(where: { $0.text("name").caseInsensitiveCompare(name) == .orderedSame }) else { return nil }
+        return name
+    }
+    func createProject(_ name: String) -> Record? {
+        let path = NSHomeDirectory() + "/Desktop/Code/" + name
+        if demo { receipt = "Demo: \(name) would be created in Desktop/Code."; receiptDate = Date(); return ["name": name, "path": path] }
+        do { try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true) }
+        catch { self.error = "Could not create \(name): " + error.localizedDescription; layout(); return nil }
+        receipt = "Created \(name) in Desktop/Code."; receiptDate = Date()
+        return ["name": name, "path": path]
+    }
+    // The highlighted match for the typed name, or the new project it names.
+    func typedFolder() -> Record? {
+        let choices = folderChoices
+        if keyboardIndex < choices.count { return choices[keyboardIndex] }
+        guard let name = newProjectName else { return nil }
+        return createProject(name)
+    }
+    func chooseFolder(_ f: Record, keepDraft: Bool = false) {
+        // A submitted prompt moves with its destination; otherwise each folder keeps its own draft.
+        if keepDraft { drafts[draftKey] = nil } else { saveDraft() }
+        folder = f.text("path"); defaults.set(folder, forKey: "workspace.folder")
+        folderField.stringValue = f.text("name"); query = ""
+        if keepDraft { saveDraft() } else { composer.string = drafts[draftKey] ?? "" }
+        expanded = false; layout(); panel.makeFirstResponder(composer)
     }
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-        let choices = mode == "new" ? state.records("folders").filter { query.isEmpty || $0.text("name").localizedCaseInsensitiveContains(query) } : sessions.filter { s in query.isEmpty || ["project", "provider", "tty", "cwd", "name", "window_name"].contains { s.text($0).localizedCaseInsensitiveContains(query) } }
+        let choices = mode == "new" ? folderChoices : sessions.filter { s in query.isEmpty || ["project", "provider", "tty", "cwd", "name", "window_name"].contains { s.text($0).localizedCaseInsensitiveContains(query) } }
         if selector == #selector(NSResponder.moveDown(_:)) || selector == #selector(NSResponder.moveUp(_:)) {
             let delta = selector == #selector(NSResponder.moveDown(_:)) ? 1 : -1
-            keyboardIndex = max(0, min(choices.count-1, keyboardIndex+delta)); expanded = true
+            let rows = choices.count + (newProjectName == nil ? 0 : 1)
+            keyboardIndex = max(0, min(rows-1, keyboardIndex+delta)); expanded = true
             let rowHeight: CGFloat = mode == "new" ? 34 : 52
             scrollOffset = max(0, CGFloat(keyboardIndex)*rowHeight-156); layout(); return true
         }
         if selector == #selector(NSResponder.insertNewline(_:)) {
-            guard !choices.isEmpty else { return true }
-            let choice = choices[min(keyboardIndex, choices.count-1)]
             if mode == "new" {
-                saveDraft(); folder = choice.text("path"); defaults.set(folder, forKey: "workspace.folder")
-                folderField.stringValue = choice.text("name"); composer.string = drafts[draftKey] ?? ""
-                expanded = false; query = ""; layout(); panel.makeFirstResponder(composer)
-            } else {
-                // The Enter shortcut follows the same visible ordering as the list.
-                select(choice); panel.makeFirstResponder(composer)
+                if query.isEmpty {
+                    // Nothing typed: keep the current project rather than the first in the list.
+                    if !folder.isEmpty { chooseFolder(["name": (folder as NSString).lastPathComponent, "path": folder]) }
+                } else if let choice = typedFolder() { chooseFolder(choice) }
+                return true
             }
+            guard !choices.isEmpty else {
+                // No terminal by that name: offer the matching projects instead.
+                mode = "new"; keyboardIndex = 0; layout(); return true
+            }
+            // The Enter shortcut follows the same visible ordering as the list.
+            select(choices[min(keyboardIndex, choices.count-1)]); panel.makeFirstResponder(composer)
             return true
         }
         return false
@@ -556,16 +620,17 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         return false
     }
     func submit() {
-        guard !pending else { return }
+        guard !busy else { return }
         if swapMode { hopProvider(); return }
         let prompt = composer.string.trimmingCharacters(in: .whitespacesAndNewlines)
         if let sid = selectedID {
             if !prompt.isEmpty { copy(prompt, receipt: "Draft copied. Paste it in the terminal when ready.") }
             act("focus", ["session": sid]); return
         }
+        // Return launches where the folder field points; no separate confirmation step.
+        if mode == "new" && !query.isEmpty, let choice = typedFolder() { chooseFolder(choice, keepDraft: true) }
         guard query.isEmpty, !folder.isEmpty, folderField.stringValue == (folder as NSString).lastPathComponent else {
-            expanded = true
-            if query.isEmpty { mode = "new" }
+            expanded = true; mode = "new"
             layout(); folderField.selectText(nil); return
         }
         act("launch", ["folder": folder, "provider": provider, "prompt": prompt])
@@ -602,14 +667,18 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         }
     }
     func act(_ action: String, _ fields: Record = [:]) {
-        let pause = action == "controller" && fields["enabled"] as? Bool == false
-        guard !pending || pause else { return }; pending = true; error = ""
+        // Pause and awake are explicit clicks; a background refresh must not swallow them.
+        let urgent = (action == "controller" && fields["enabled"] as? Bool == false) || action == "awake"
+        let read = ["state", "refresh", "cached"].contains(action)
+        guard !(read ? pending : busy) || urgent else { return }
+        // A superseded read still occupies the serial queue, so run past it.
+        let skipQueue = urgent || pending; pending = true; pendingRead = read; error = ""
         let requestID = UUID(); activeRequest = requestID
         var request = fields; request["action"] = action
         let sourceDraft = draftKey; let sentDraft = composer?.string ?? ""
         layout()
-        run(["workspace"] + (demo ? ["--demo"] : []), input: request, urgent: pause) { [weak self] response in
-            guard let self = self, self.activeRequest == requestID else { return }; self.pending = false; self.lastRefresh = Date()
+        run(["workspace"] + (demo ? ["--demo"] : []), input: request, urgent: skipQueue) { [weak self] response in
+            guard let self = self, self.activeRequest == requestID else { return }; self.pending = false; self.pendingRead = false; self.lastRefresh = Date()
             if let problem = response["error"] as? String { self.error = problem }
             else {
                 self.state = response.record("state")
@@ -763,12 +832,21 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         menu.popUp(positioning: nil, at: NSPoint(x: 325, y: 28), in: canvas)
     }
     @objc func pickAwake(_ item: NSMenuItem) { act("awake", ["duration": item.representedObject as? String ?? "off"]) }
-    @objc func setupAwake() {
+    // One click: on (longest timer) or off. Right-click chooses a shorter timer.
+    func toggleAwake() {
+        let awake = state.record("awake")
+        guard !awake.isEmpty else { fetch(force: true); return }
+        if !demo && !awake.flag("helper_installed") { installAwake(then: "24h"); return }
+        act("awake", ["duration": awake.text("state", "off") == "off" ? "24h" : "off"])
+    }
+    @objc func setupAwake() { installAwake(then: nil) }
+    func installAwake(then duration: String?) {
         guard !demo else { return }
         receipt = "Setting up closed-lid mode. Complete the macOS authentication dialog."; receiptDate = Date(); layout()
         run(["awake", "setup"], urgent: true) { [weak self] response in
             guard let self = self else { return }
-            self.error = response.text("error"); self.receipt = response.text("message"); self.receiptDate = Date(); self.fetch(force: true)
+            self.error = response.text("error"); self.receipt = response.text("message"); self.receiptDate = Date()
+            if let duration = duration, self.error.isEmpty { self.act("awake", ["duration": duration]) } else { self.fetch(force: true) }
         }
     }
     func showMenu() {
