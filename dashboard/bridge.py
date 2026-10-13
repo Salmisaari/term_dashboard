@@ -160,10 +160,14 @@ def is_python(command):
 
 
 def provider_for(commands, title="", arguments=""):
-    for provider in ("claudex", "claude", "codex", "hermes", "grok"):
+    for provider in ("claudex", "claude", "codex", "hermes", "grok", "muse"):
         # Titles alone are not proof that an agent process is still alive.
         for command in commands:
-            if Path(command).name.lower().lstrip("-") in (provider, provider + ".exe"):
+            name = Path(command).name.lower().lstrip("-")
+            if name in (provider, provider + ".exe"):
+                return provider
+            # The muse launcher execs a versioned muse-bin-<version> binary.
+            if provider == "muse" and name.startswith("muse-bin"):
                 return provider
     # Console scripts such as Hermes keep Python as their executable identity.
     # Only inspect the script position, never a prompt or another script's args.
@@ -284,7 +288,7 @@ class MacBridge:
             ident = f'{app}:{row["native_id"]}'
             if app != "iTerm2":
                 ident += ":" + instance
-            title_project = re.sub(r"\s+\((?:codex|claude|claudex|hermes|grok)\)$", "", re.sub(r"^[^\w~/.]+", "", row["name"]))[:80]
+            title_project = re.sub(r"\s+\((?:codex|claude|claudex|hermes|grok|muse)\)$", "", re.sub(r"^[^\w~/.]+", "", row["name"]))[:80]
             sessions.append(dict(row, id=ident, instance=instance, cwd=cwd,
                                  project=project_for(cwd, registry) if cwd else title_project or "Terminal", provider=provider,
                                  status="running" if provider != "shell" else "shell",

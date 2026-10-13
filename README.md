@@ -24,7 +24,7 @@ td status
 | **jq** | `brew install jq` |
 | **Python 3.9+** | Ships with Xcode Command Line Tools; no extra packages |
 | **[Homebrew](https://brew.sh)** | Recommended for installing deps |
-| **Claude / Claudex / Codex / Hermes / Grok** | Optional — install the CLI you want Quick Add to launch |
+| **Claude / Claudex / Codex / Hermes / Grok / Muse** | Optional — install the CLI you want Quick Add to launch |
 | **GitHub CLI (`gh`)** | Optional — for `td standup` PR/CI status |
 
 ### Install dependencies
@@ -209,7 +209,7 @@ td menubar stop     # Quit
 **Menu bar features:**
 - **Click** → Compact Quick Add bar; click its session count for the workspace
 - **Right-click** → Quick Add, sessions, tiling, auto-tile, quit
-- **Caps Lock double-tap** → Quick Add panel: browse `~/Desktop/Code/`, click the provider name to cycle Claude → Claudex → Codex → Hermes → Grok. Click `>` to turn it into a swap control, then click `⇄` to open the next provider in the same folder with a continue prompt from the live terminal. If that folder has several terminals, pick the one to leave from the list. The old window stays and keeps its title. Each new agent launches interactively in no-permission mode. Type a project name and press Return to launch there; a name with no folder becomes a new project in `~/Desktop/Code/`. Type multiline prompts that expand vertically
+- **Caps Lock double-tap** → Quick Add panel: browse `~/Desktop/Code/`, click the provider name to cycle Claude → Claudex → Codex → Hermes → Grok → Muse. Click `>` to turn it into a swap control, then click `⇄` to open the next provider in the same folder with a continue prompt from the live terminal. If that folder has several terminals, pick the one to leave from the list. The old window stays and keeps its title. Each new agent launches interactively in no-permission mode. Type a project name and press Return to launch there; a name with no folder becomes a new project in `~/Desktop/Code/`. Type multiline prompts that expand vertically
 - Session rows show exact terminals and recent agent reports; a running process alone does not imply progress
 
 The first launch compiles the Swift source — takes ~10 seconds. Subsequent launches are instant.

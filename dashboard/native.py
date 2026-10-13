@@ -16,9 +16,10 @@ PROVIDERS = {
     "codex": ["codex", "--dangerously-bypass-approvals-and-sandbox"],
     "hermes": ["hermes", "--yolo", "--cli"],
     "grok": ["grok", "--always-approve"],
+    "muse": ["muse", "--yolo"],
 }
 HANDOFF_FILES = ("NEXT_SESSION.md", "CONTINUE.md", "HANDOFF.md")
-PROVIDER_SUFFIX = re.compile(r"\s+\((?:codex|claude|claudex|hermes|grok)\)$", re.I)
+PROVIDER_SUFFIX = re.compile(r"\s+\((?:codex|claude|claudex|hermes|grok|muse)\)$", re.I)
 STATUS_MARK = re.compile(r"[\u2800-\u28FF◑✳☀★☆●○]")
 ITERM_SOCKET = Path.home() / "Library/Application Support/iTerm2/private/socket"
 
@@ -387,7 +388,7 @@ def resolve_swap_session(work, request):
 def swap_session(work, request):
     provider = request.get("provider")
     if provider not in PROVIDERS:
-        raise WorkspaceError("Choose Claude, Claudex, Codex, Hermes, or Grok.")
+        raise WorkspaceError("Choose Claude, Claudex, Codex, Hermes, Grok, or Muse.")
     work.refresh()
     session = resolve_swap_session(work, request)
     if session.get("provider") == provider:
@@ -447,7 +448,7 @@ def ensure_grok_compact_mode(config_path=None):
 def launch_command(folder, provider, prompt, code_dir=None):
     root = (code_dir or Path.home() / "Desktop/Code").resolve()
     if provider not in PROVIDERS:
-        raise WorkspaceError("Choose Claude, Claudex, Codex, Hermes, or Grok.")
+        raise WorkspaceError("Choose Claude, Claudex, Codex, Hermes, Grok, or Muse.")
     if provider == "grok":
         ensure_grok_compact_mode()
     path = Path(bounded(folder, "Folder", 2000)).expanduser().resolve()

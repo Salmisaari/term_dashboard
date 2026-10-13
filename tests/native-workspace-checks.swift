@@ -152,7 +152,7 @@ delegate.didRespond = { action in
         delegate.error = ""; delegate.expanded = false; delegate.composer.string = ""
         delegate.selectedID = nil; delegate.folderField.stringValue = "Peppe_agent"; delegate.receiptDate = .distantPast
         delegate.layout(); check(delegate.panel.frame.height == 52, "Resting bar stays 400 × 52 points")
-        check(delegate.launchProviders == ["claude", "claudex", "codex", "hermes", "grok"], "Launch cycle includes Grok")
+        check(delegate.launchProviders == ["claude", "claudex", "codex", "hermes", "grok", "muse"], "Launch cycle includes Grok and Muse")
         delegate.provider = "claude"; delegate.layout()
         delegate.providerButton.performClick(nil)
         check(delegate.provider == "claudex" && delegate.providerButton.title == "claudex", "Clicking Claude advances to Claudex")
@@ -163,7 +163,9 @@ delegate.didRespond = { action in
         delegate.providerButton.performClick(nil)
         check(delegate.provider == "grok" && delegate.providerButton.title == "grok", "Clicking Hermes advances to Grok")
         delegate.providerButton.performClick(nil)
-        check(delegate.provider == "claude" && delegate.providerButton.title == "claude", "Clicking Grok wraps back to Claude")
+        check(delegate.provider == "muse" && delegate.providerButton.title == "muse", "Clicking Grok advances to Muse")
+        delegate.providerButton.performClick(nil)
+        check(delegate.provider == "claude" && delegate.providerButton.title == "claude", "Clicking Muse wraps back to Claude")
         check(delegate.pickerButton.title == ">", "Picker starts as >")
         delegate.provider = "grok"
         delegate.folderField.stringValue = "penny_agent"

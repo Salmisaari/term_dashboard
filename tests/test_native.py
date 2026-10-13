@@ -169,7 +169,7 @@ class NativeTest(unittest.TestCase):
         root = Path(self.temp.name)
         project = root / "Edward's $(touch unwanted)"; project.mkdir()
         prompt = "Read `not a command`\nthen explain $HOME and 'quotes'"
-        for provider in ("claude", "claudex", "codex", "grok"):
+        for provider in ("claude", "claudex", "codex", "grok", "muse"):
             command = launch_command(str(project), provider, prompt, root)
             tokens = shlex.split(command)
             self.assertIn(str(project.resolve()), tokens)
@@ -177,6 +177,7 @@ class NativeTest(unittest.TestCase):
             self.assertIn(provider, tokens)
         grok = launch_command(str(project), "grok", prompt, root)
         self.assertIn("--always-approve", grok)
+        self.assertIn("--yolo", launch_command(str(project), "muse", prompt, root))
         hermes = launch_command(str(project), "hermes", prompt, root)
         self.assertTrue(hermes.endswith("hermes --yolo --cli"))
         self.assertNotIn("--oneshot", hermes)

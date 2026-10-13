@@ -98,8 +98,9 @@ enum LaunchAgent: String {
     case codex
     case hermes
     case grok
+    case muse
 
-    static let all: [LaunchAgent] = [.claude, .claudex, .codex, .hermes, .grok]
+    static let all: [LaunchAgent] = [.claude, .claudex, .codex, .hermes, .grok, .muse]
     static let defaultsKey = "td.selectedLaunchAgent"
 
     static func saved() -> LaunchAgent {
@@ -121,6 +122,7 @@ enum LaunchAgent: String {
         case .codex: return "Codex"
         case .hermes: return "Hermes"
         case .grok: return "Grok"
+        case .muse: return "Muse"
         }
     }
 
@@ -132,6 +134,7 @@ enum LaunchAgent: String {
         case .codex: return "codex --dangerously-bypass-approvals-and-sandbox"
         case .hermes: return "hermes --yolo --cli"
         case .grok: return "grok --always-approve"
+        case .muse: return "muse --yolo"
         }
     }
 }
@@ -713,7 +716,7 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         modelBtn.action = #selector(cycleAgent)
         modelBtn.focusRingType = .none
         modelBtn.setButtonType(.momentaryChange)
-        modelBtn.toolTip = "click: cycle claude → claudex → codex → hermes → grok"
+        modelBtn.toolTip = "click: cycle claude → claudex → codex → hermes → grok → muse"
         inner.addSubview(modelBtn)
         agentLabel = modelBtn
 
@@ -856,7 +859,7 @@ class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         (agentButton as? AgentSelectorButton)?.refresh()
     }
 
-    // Click to advance to the next agent (claude → claudex → codex → hermes → grok → claude),
+    // Click to advance to the next agent (claude → claudex → codex → hermes → grok → muse → claude),
     // the same click-to-cycle pattern as the awake pill.
     @objc func cycleAgent() {
         let all = LaunchAgent.all

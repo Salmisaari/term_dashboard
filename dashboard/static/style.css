@@ -558,6 +558,10 @@ main {
   background:#e8ecf3;
   color:#5d6b86
 }
+.avatar.muse {
+  background:#ece8f3;
+  color:#74658f
+}
 .session-copy {
   min-width:0
 }

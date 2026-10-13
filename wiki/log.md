@@ -43,3 +43,6 @@ Awake pill toggles 24h/off in one click (right-click: timers); reinstalled the s
 
 ## [2026-10-12] change | Awake pill cycles timers and counts down
 Clicks step off → 1h → 4h → 24h → off (matching `td awake`); the pill shows the remaining time, ticking each second while the panel is open.
+
+## [2026-10-13] feature | Muse joins the Quick Add cycle
+Meta's Muse Code CLI is the sixth provider (claude → claudex → codex → hermes → grok → muse), launched with `muse --yolo`; its launcher execs `muse-bin-<version>`, so session detection matches that name.

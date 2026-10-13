@@ -33,7 +33,7 @@ fi
 echo ""
 echo "Test 2: Hermes is registered in the launch cycle"
 assert_source "Hermes enum case exists" "case hermes"
-assert_source "Launch cycle includes Hermes" "[.claude, .claudex, .codex, .hermes, .grok]"
+assert_source "Launch cycle includes Hermes" "[.claude, .claudex, .codex, .hermes, .grok, .muse]"
 assert_source "Hermes display name is configured" 'case .hermes: return "Hermes"'
 
 echo ""
@@ -59,10 +59,10 @@ echo ""
 echo ""
 echo "Test 5: Grok is registered in the launch cycle"
 assert_source "Grok enum case exists" "case grok"
-assert_source "Launch cycle includes Grok" "[.claude, .claudex, .codex, .hermes, .grok]"
+assert_source "Launch cycle includes Grok" "[.claude, .claudex, .codex, .hermes, .grok, .muse]"
 assert_source "Grok display name is configured" 'case .grok: return "Grok"'
 assert_source "Grok launches with --always-approve" 'case .grok: return "grok --always-approve"'
-if grep -Fq '["claude", "claudex", "codex", "hermes", "grok"]' "$WORKSPACE"; then
+if grep -Fq '["claude", "claudex", "codex", "hermes", "grok", "muse"]' "$WORKSPACE"; then
   ok "Native workspace cycle includes Grok"
 else
   fail "Native workspace cycle includes Grok"
@@ -80,6 +80,26 @@ if command -v grok >/dev/null 2>&1; then
   fi
 else
   fail "Grok executable is not installed"
+fi
+
+echo ""
+echo "Test 6: Muse is registered in the launch cycle"
+assert_source "Muse enum case exists" "case muse"
+assert_source "Muse display name is configured" 'case .muse: return "Muse"'
+assert_source "Muse launches with --yolo" 'case .muse: return "muse --yolo"'
+if grep -Fq '"muse": ["muse", "--yolo"]' "$ROOT/dashboard/native.py"; then
+  ok "Native launch command uses muse --yolo"
+else
+  fail "Native launch command uses muse --yolo"
+fi
+if command -v muse >/dev/null 2>&1; then
+  if muse --yolo --help >/dev/null; then
+    ok "Installed Muse accepts --yolo"
+  else
+    fail "Installed Muse rejected --yolo"
+  fi
+else
+  fail "Muse executable is not installed"
 fi
 
 echo "Results: $PASS passed, $FAIL failed"

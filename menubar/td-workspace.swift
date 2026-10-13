@@ -113,7 +113,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
     var selectedID: String?
     var folder = ""
     var provider = "codex"
-    let launchProviders = ["claude", "claudex", "codex", "hermes", "grok"]
+    let launchProviders = ["claude", "claudex", "codex", "hermes", "grok", "muse"]
     var swapMode = false
     var query = ""
     var state: Record = [:]
@@ -235,7 +235,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         folderField.placeholderString = "project or terminal"; folderField.stringValue = (folder as NSString).lastPathComponent
         folderField.setAccessibilityLabel("Search projects and terminals"); canvas.addSubview(folderField)
         providerButton = button(provider, 227, 5, 58, on: canvas) { [weak self] in self?.cycleProvider() }
-        providerButton.toolTip = "click: next agent · claude → claudex → codex → hermes → grok"
+        providerButton.toolTip = "click: next agent · claude → claudex → codex → hermes → grok → muse"
         countButton = button("···", 291, 5, 46, on: canvas) { [weak self] in
             guard let self = self else { return }
             if self.expanded && !self.swapMode { self.expanded = false; self.layout() }
@@ -332,7 +332,7 @@ final class TD: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTextView
         pickerButton.toolTip = swapMode ? "click: open this agent with the previous conversation" : "click: swap this terminal to another agent"
         pickerButton.setAccessibilityLabel(swapMode ? "Swap to the selected agent" : "Arm provider swap")
         providerButton.title = swapMode ? provider : (selected?.text("provider") ?? provider)
-        providerButton.toolTip = swapMode ? "click: choose where to continue" : "click: next agent · claude → claudex → codex → hermes → grok"
+        providerButton.toolTip = swapMode ? "click: choose where to continue" : "click: next agent · claude → claudex → codex → hermes → grok → muse"
         let counts = state.record("counts"); let attention = Int(counts.number("attention")) + state.records("proposals").filter { $0.text("status") == "pending" }.count
         let warning = !error.isEmpty || !missingAccess.isEmpty || state.flag("stale") || !(state["warnings"] as? [String] ?? []).isEmpty
         let detail = !error.isEmpty ? error : !missingAccess.isEmpty ? "Terminal access needed. Click to connect." : warning ? "Connection needs attention. Click for details." : Date().timeIntervalSince(receiptDate) < 8 ? receipt : "All terminals · ⌘L"
