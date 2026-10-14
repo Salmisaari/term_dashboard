@@ -46,3 +46,6 @@ Clicks step off → 1h → 4h → 24h → off (matching `td awake`); the pill sh
 
 ## [2026-10-13] feature | Muse joins the Quick Add cycle
 Meta's Muse Code CLI is the sixth provider (claude → claudex → codex → hermes → grok → muse), launched with `muse --yolo`; its launcher execs `muse-bin-<version>`, so session detection matches that name.
+
+## [2026-10-14] investigation | Quick Add "heelprints" opens arbeitschuhe
+Code/heelprints is a symlink to Code/arbeitschuhe (agent rename 2026-10-10); td lists symlinks by link name but launch resolves them (dashboard/native.py launch_command, title), so it cds into and titles the target. Not a td bug. Pending the user's "go" (and close the idle Louboutin tab on ttys004 first): split back into two repos: rename folder and GitHub repo to heelprints, new empty private arbeitschuhe repo, trash the German-narrated steel-cap/"Does it hold?" material, move the English arbeitschuhe docs (SERIES.md, SERIES_saves.md, season3, look frames d-f) over, give miu an arbeitschuhe tag via miu's session; open question: also remove the old German ~/Desktop/arbeitsschuhe.
