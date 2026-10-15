@@ -52,3 +52,6 @@ Code/heelprints is a symlink to Code/arbeitschuhe (agent rename 2026-10-10); td 
 
 ## [2026-10-15] fix | Watchdog release queue no longer stalls behind one draft
 cooldown.py released cases smallest first, and an "asked" case whose pane couldn't be told (an unsent draft in its input box) kept its place, so it was picked again every tick: pienisuurikylä's draft held 11 cases, among them SIGSTOPped jobs, from 20:39 to 01:30. Now an untold case waits UNTOLD_WAIT (10 min) and the next one goes first; paused jobs still resume even when untold. Backup: ~/.config/td/cooldown.py.bak-20261015. Patched by miu-af overnight at Johannes's request to keep work moving after alerts end.
+
+## [2026-10-15] fix | cooldown: a disk-only warm no longer asks to pause a memory job
+Johannes: the heads-up "doesn't make sense as there's room" (warm at 9.6 GB disk, memory 54 %, and it named a 0.6 GB search to pause). crossed(m, level) names the lines a reading is over; when the disk is the only one, the heads-up says the disk is filling and asks for no fetches, model downloads or big local files, and lets running jobs go on. Backup cooldown.py.bak-20261015b.
